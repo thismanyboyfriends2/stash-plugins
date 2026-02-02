@@ -1,0 +1,9 @@
+# Aliases to ignore during tag merge
+# One alias per line. Lines starting with # are comments.
+# These aliases will be excluded to prevent conflicts with existing tag names or other aliases.
+
+2D Animation
+3D Animation
+East Indian
+Pakistani
+Indian Female
