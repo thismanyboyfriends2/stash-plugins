@@ -1,24 +1,25 @@
-# Template for creating Stash plugins source index
+# Stash Plugins
 
-This template allows you to create a new repository with a few clicks with preconfigured GitHub action to publish your plugins source index. 
-_This assumes you already know how to create plugins for Stash. If you don't, first read [this](https://docs.stashapp.cc/in-app-manual/plugins/#creating-plugins)._
+A collection of plugins for [Stash](https://stashapp.cc/).
 
-## How to use it?
+## Installation
 
-1. Click **Use this template** > **Create a new repository**. 
-1. Choose a repository name and click **Create repository**.
-1. Open **Settings** and head to **Pages**.
-1. Under Build and deployment select the Source as GitHub Actions.
+1. Go to **Settings** > **Plugins**
+2. Click **Available Plugins** > **Add Source**
+3. Enter the source URL:
+   ```
+   https://thismanyboyfriends2.github.io/stash-plugins/main/index.yml
+   ```
+4. Click **Confirm**
 
-Now add your plugins to [plugins](/plugins) directory and they will be automatically published to the source index.
+The plugins will appear in the Available Plugins list.
 
-Source index URL: [`https://<your-username>.github.io/<repository-name>/main/index.yml`](https://<your-username>.github.io/<repository-name>/main/index.yml)
+## Plugins
 
-## Share your plugins
+| Plugin | Description |
+|--------|-------------|
+| **StashDB Tag Synchroniser** | Synchronises tags from StashDB to your local Stash instance. Three-stage matching (stash_id → name → create new), 24-hour caching, case-insensitive matching, configurable alias exclusions. Requires Python 3.12+ and StashDB API key. |
 
-- [Create a new topic](https://discourse.stashapp.cc/t/-/33) for your plugin on the community forum.
-- [Add your source index to the list](https://discourse.stashapp.cc/t/-/122) on the Stash community forum.
+## Licence
 
-## License
-
-The default license is set to [AGPL-3.0](/LICENCE). Before publishing any plugins you can change it.
+[AGPL-3.0](LICENCE)
