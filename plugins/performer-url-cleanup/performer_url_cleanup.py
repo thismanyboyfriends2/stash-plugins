@@ -5,13 +5,19 @@ Normalises, deduplicates, and sorts performer URLs.
 import json
 import sys
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urlunparse
 
-# Debug output paths (temporary)
-DEBUG_DIR = r"C:\stash"
-DEBUG_BY_PERFORMER = f"{DEBUG_DIR}\\url_cleanup_by_performer.txt"
-DEBUG_BY_DOMAIN = f"{DEBUG_DIR}\\url_cleanup_by_domain.txt"
-DEBUG_POTENTIAL = f"{DEBUG_DIR}\\url_cleanup_potential.txt"
+# Number of parallel threads for updates
+PARALLEL_WORKERS = 10
+
+import os
+
+# Debug output paths - written to plugin directory
+PLUGIN_DIR = os.path.dirname(os.path.realpath(__file__))
+DEBUG_BY_PERFORMER = os.path.join(PLUGIN_DIR, "debug_by_performer.txt")
+DEBUG_BY_DOMAIN = os.path.join(PLUGIN_DIR, "debug_by_domain.txt")
+DEBUG_POTENTIAL = os.path.join(PLUGIN_DIR, "debug_potential.txt")
 
 try:
     import stashapi.log as log
@@ -310,7 +316,7 @@ def deduplicate_and_sort(urls):
     return sorted_urls, changes, potential_changes
 
 
-def process_performers(stash, dry_run=True):
+def process_performers(stash, dry_run=True, write_debug=False):
     """Process all performers and clean up their URLs."""
     # Fetch all performers with URLs
     log.info("Fetching performers with URLs...")
@@ -357,16 +363,17 @@ def process_performers(stash, dry_run=True):
         log.info("No URL changes needed - all performers are already clean")
         return
 
-    # Write debug files
-    write_debug_files(performers_to_update)
-    log.info(f"Debug files written to {DEBUG_DIR}")
-
     # Filter to only performers with confirmed changes
     performers_with_changes = [p for p in performers_to_update if p['changes']]
     performers_with_potential = [p for p in performers_to_update if p['potential_changes']]
 
     log.info(f"Found {len(performers_with_changes)} performers with confirmed changes")
-    log.info(f"Found {len(performers_with_potential)} performers with potential changes (see {DEBUG_POTENTIAL})")
+    log.info(f"Found {len(performers_with_potential)} performers with potential changes")
+
+    # Write debug files if enabled
+    if write_debug:
+        write_debug_files(performers_to_update)
+        log.info(f"Debug files written to {PLUGIN_DIR}")
 
     if performers_with_changes:
         log.info(f"\n{'=' * 60}")
@@ -392,22 +399,32 @@ def process_performers(stash, dry_run=True):
             log.info("No confirmed changes to apply")
             return
 
-        log.info(f"Applying changes to {len(performers_with_changes)} performers...")
+        log.info(f"Applying changes to {len(performers_with_changes)} performers using {PARALLEL_WORKERS} workers...")
 
-        for idx, p in enumerate(performers_with_changes):
-            try:
-                stash.update_performer({
-                    'id': p['id'],
-                    'urls': p['new_urls']
-                })
-                log.debug(f"Updated {p['name']}")
-            except Exception as e:
-                log.error(f"Failed to update {p['name']}: {e}")
+        completed = 0
+        failed = 0
+        total = len(performers_with_changes)
 
-            log.progress((idx + 1) / len(performers_with_changes))
+        def update_performer(p):
+            stash.update_performer({'id': p['id'], 'urls': p['new_urls']})
+            return p['name']
+
+        with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+            futures = {executor.submit(update_performer, p): p for p in performers_with_changes}
+            for future in as_completed(futures):
+                p = futures[future]
+                try:
+                    future.result()
+                    completed += 1
+                    if completed % 100 == 0 or completed == total:
+                        log.info(f"Progress: {completed}/{total} performers updated")
+                except Exception as e:
+                    log.error(f"Failed to update {p['name']}: {e}")
+                    failed += 1
+                log.progress((completed + failed) / total)
 
         log.info(f"{'=' * 60}")
-        log.info(f"Applied URL cleanup to {len(performers_with_changes)} performers")
+        log.info(f"Applied URL cleanup to {completed} performers ({failed} failed)")
         log.info(f"{'=' * 60}")
 
 
@@ -423,13 +440,16 @@ def main():
     # Get mode from args
     mode = json_input.get("args", {}).get("mode", "preview")
 
+    # Get settings
+    write_debug = json_input.get("server_connection", {}).get("PluginDir") and \
+                  stash.get_configuration().get("plugins", {}).get("performer-url-cleanup", {}).get("writeDebugFiles", False)
+
     log.info(f"Performer URL Cleanup - Mode: {mode}")
-    log.info("")
 
     if mode == "preview":
-        process_performers(stash, dry_run=True)
+        process_performers(stash, dry_run=True, write_debug=write_debug)
     elif mode == "apply":
-        process_performers(stash, dry_run=False)
+        process_performers(stash, dry_run=False, write_debug=write_debug)
     else:
         log.error(f"Unknown mode: {mode}")
 
