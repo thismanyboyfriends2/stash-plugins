@@ -13,11 +13,13 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
-    # Only run on PRs targeting main, or on @claude mentions
+    # Only run for repo owner
     if: |
-      (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+      (github.event_name == 'pull_request' && github.event.pull_request.author_association == 'OWNER') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') &&
+        github.event.comment.author_association == 'OWNER') ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') &&
+        github.event.comment.author_association == 'OWNER')
     permissions:
       contents: read
       pull-requests: write
