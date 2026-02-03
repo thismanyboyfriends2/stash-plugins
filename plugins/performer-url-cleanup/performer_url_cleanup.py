@@ -77,20 +77,6 @@ def normalise_url(url):
     return normalised, domain
 
 
-def get_canonical_url(urls):
-    """Given a list of equivalent URLs, return the canonical one.
-
-    For PRESERVE_CASE sites, keeps the first occurrence.
-    For others, returns the normalised (lowercase) version.
-    """
-    if not urls:
-        return None
-
-    # All URLs should normalise to the same thing
-    # Return the first one's normalised form
-    return urls[0]
-
-
 def deduplicate_and_sort(urls):
     """Normalise, deduplicate, and sort URLs.
 
@@ -127,9 +113,8 @@ def deduplicate_and_sort(urls):
 
     sorted_urls = sorted(result_urls, key=sort_key)
 
-    # Check if order changed
-    original_normalised = [normalise_url(u)[0] for u in urls if normalise_url(u)[0].lower() in {u.lower() for u in result_urls}]
-    if sorted_urls != list(dict.fromkeys(original_normalised)):  # Remove dups preserving order
+    # Check if order changed (result_urls preserves original order after dedup)
+    if result_urls != sorted_urls:
         changes.append("Reordered URLs alphabetically by domain")
 
     return sorted_urls, changes

@@ -3,7 +3,7 @@ description: Normalises, deduplicates, and sorts performer URLs
 version: 1.0.0
 url: https://github.com/thismanyboyfriends2/stash-plugins
 exec:
-  - python
+  - python3
   - "{pluginDir}/performer_url_cleanup.py"
 interface: raw
 tasks:
