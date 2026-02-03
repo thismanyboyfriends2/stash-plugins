@@ -1,5 +1,5 @@
 name: Copy StashBox URLs
-description: Batch jobs to extract StashBox URLs from StashIDs and add them to scene and performer URL fields
+description: Extracts StashBox URLs from StashIDs and adds them to scene and performer URL fields
 version: 2.0.0
 url: https://github.com/yourusername/copyStashBoxUrls
 exec:
