@@ -1,0 +1,17 @@
+name: Performer URL Cleanup
+description: Normalises, deduplicates, and sorts performer URLs
+version: 1.0.0
+url: https://github.com/thismanyboyfriends2/stash-plugins
+exec:
+  - python
+  - "{pluginDir}/performer_url_cleanup.py"
+interface: raw
+tasks:
+  - name: Preview URL Cleanup
+    description: Shows what URL changes would be made without applying them
+    defaultArgs:
+      mode: preview
+  - name: Apply URL Cleanup
+    description: Normalises, deduplicates, and sorts all performer URLs
+    defaultArgs:
+      mode: apply
