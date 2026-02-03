@@ -6,6 +6,11 @@ exec:
   - python3
   - "{pluginDir}/performer_url_cleanup.py"
 interface: raw
+settings:
+  writeDebugFiles:
+    displayName: Write debug files
+    description: Output debug text files to the plugin directory for reviewing changes
+    type: BOOLEAN
 tasks:
   - name: Preview URL Cleanup
     description: Shows what URL changes would be made without applying them
