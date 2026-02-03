@@ -271,8 +271,9 @@ def deduplicate_and_sort(urls):
 
         if normalised_lower in seen:
             # Duplicate found - prefer mixed case version (likely from scraper)
+            # Check original URLs for mixed case, not normalised ones (which may be lowercased)
             existing_normalised, existing_original, existing_domain, existing_known = seen[normalised_lower]
-            if has_mixed_case(normalised) and not has_mixed_case(existing_normalised):
+            if has_mixed_case(url) and not has_mixed_case(existing_original):
                 seen[normalised_lower] = (normalised, url, domain, known)
                 msg = f"Remove duplicate: {existing_original} (prefer mixed-case {url})"
                 if known or existing_known:
