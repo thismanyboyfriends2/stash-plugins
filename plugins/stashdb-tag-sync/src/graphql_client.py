@@ -1,11 +1,13 @@
 """
 GraphQL client for StashDB API.
 Fetches tag information directly from the StashDB.org GraphQL endpoint.
+Uses only stdlib (urllib) for zero external dependencies.
 """
-import logging
-import requests
-import time
 import json
+import logging
+import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import List, Dict, Optional
 
