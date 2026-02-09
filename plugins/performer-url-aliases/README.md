@@ -18,6 +18,9 @@ Scans all performers in your Stash library and:
 | X / Twitter | `https://x.com/janedoe` | `janedoe` |
 | Instagram | `https://www.instagram.com/janedoe` | `janedoe` |
 | Fansly | `https://fansly.com/janedoe` | `janedoe` |
+| TikTok | `https://www.tiktok.com/@janedoe` | `janedoe` |
+| LoyalFans | `https://www.loyalfans.com/JaneDoe` | `JaneDoe` |
+| Linktree | `https://linktr.ee/JaneDoe` | `JaneDoe` |
 
 Non-username paths (e.g., `/about`, `/login`, `/explore`) are automatically skipped.
 

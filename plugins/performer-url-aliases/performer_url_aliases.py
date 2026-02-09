@@ -15,13 +15,17 @@ except ModuleNotFoundError:
     }))
     sys.exit(1)
 
-# Domains to extract usernames from
+# Domains to extract usernames from, with optional extraction config:
+#   strip_prefix: require and remove this prefix from the username (e.g. tiktok.com/@name)
 EXTRACT_DOMAINS = {
-    'onlyfans.com',
-    'x.com',
-    'twitter.com',
-    'instagram.com',
-    'fansly.com',
+    'onlyfans.com': {},
+    'x.com': {},
+    'twitter.com': {},
+    'instagram.com': {},
+    'fansly.com': {},
+    'tiktok.com': {'strip_prefix': '@'},
+    'loyalfans.com': {},
+    'linktr.ee': {},
 }
 
 # Non-username path segments to skip
@@ -37,15 +41,22 @@ def extract_username_from_url(url):
     parsed = urlparse(url)
     domain = parsed.netloc.lower().removeprefix('www.')
 
-    if domain not in EXTRACT_DOMAINS:
+    config = EXTRACT_DOMAINS.get(domain)
+    if config is None:
         return None
 
-    # Take first path segment
     path = parsed.path.strip('/')
     if not path:
         return None
 
     username = path.split('/')[0]
+
+    # Some sites prefix usernames with @ in the URL (e.g. tiktok.com/@name)
+    strip_prefix = config.get('strip_prefix')
+    if strip_prefix:
+        if not username.startswith(strip_prefix):
+            return None
+        username = username[len(strip_prefix):]
 
     if not username or username.lower() in SKIP_PATHS:
         return None
