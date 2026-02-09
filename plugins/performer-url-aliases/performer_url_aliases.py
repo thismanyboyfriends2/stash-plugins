@@ -67,11 +67,19 @@ def deduplicate_aliases(extracted, existing_aliases, performer_name):
     """Case-insensitive dedup against existing aliases, performer name, and self."""
     seen = set()
 
-    # Build set of existing names (lowercase)
-    for alias in existing_aliases:
-        seen.add(alias.lower())
     if performer_name:
         seen.add(performer_name.lower())
+
+    # Dedup existing aliases (handles pre-existing duplicates in Stash data)
+    clean_existing = []
+    removed_duplicates = []
+    for alias in existing_aliases:
+        lower = alias.lower()
+        if lower not in seen:
+            seen.add(lower)
+            clean_existing.append(alias)
+        else:
+            removed_duplicates.append(alias)
 
     new_aliases = []
     for username in extracted:
@@ -80,7 +88,7 @@ def deduplicate_aliases(extracted, existing_aliases, performer_name):
             seen.add(lower)
             new_aliases.append(username)
 
-    return new_aliases
+    return clean_existing, new_aliases, removed_duplicates
 
 
 def process_performers(stash, dry_run=True):
@@ -113,38 +121,51 @@ def process_performers(stash, dry_run=True):
             continue
 
         extracted = extract_usernames(urls)
-        new_aliases = deduplicate_aliases(extracted, existing_aliases, name)
+        clean_existing, new_aliases, removed_dupes = deduplicate_aliases(
+            extracted, existing_aliases, name
+        )
 
-        if new_aliases:
+        if new_aliases or removed_dupes:
             performers_to_update.append({
                 'id': performer['id'],
                 'name': name,
-                'existing_aliases': existing_aliases,
+                'existing_aliases': clean_existing,
                 'new_aliases': new_aliases,
+                'removed_duplicates': removed_dupes,
             })
 
         if count > 0:
             log.progress((idx + 1) / count)
 
     if not performers_to_update:
-        log.info("No new aliases to add - all usernames already present")
+        log.info("No changes needed - all usernames already present")
         return
 
-    log.info(f"Found {len(performers_to_update)} performers with new aliases")
+    log.info(f"Found {len(performers_to_update)} performers to update")
 
     log.info(f"\n{'=' * 60}")
-    log.info("Extracted aliases:")
+    log.info("Changes:")
     log.info(f"{'=' * 60}\n")
 
     for p in performers_to_update:
         log.info(f"Performer: {p['name']} (ID: {p['id']})")
+        for alias in p.get('removed_duplicates', []):
+            log.info(f"  - {alias} (duplicate removed)")
         for alias in p['new_aliases']:
             log.info(f"  + {alias}")
+
+    total_new = sum(len(p['new_aliases']) for p in performers_to_update)
+    total_deduped = sum(len(p.get('removed_duplicates', [])) for p in performers_to_update)
 
     if dry_run:
         log.info(f"\n{'=' * 60}")
         log.info("PREVIEW MODE - No changes applied")
-        log.info(f"Run 'Extract Aliases from URLs' to add {sum(len(p['new_aliases']) for p in performers_to_update)} aliases to {len(performers_to_update)} performers")
+        parts = []
+        if total_new:
+            parts.append(f"add {total_new} aliases")
+        if total_deduped:
+            parts.append(f"remove {total_deduped} duplicates")
+        log.info(f"Run 'Extract Aliases from URLs' to {', '.join(parts)} across {len(performers_to_update)} performers")
         log.info(f"{'=' * 60}")
     else:
         log.info(f"\nApplying aliases to {len(performers_to_update)} performers...")
