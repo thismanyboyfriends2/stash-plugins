@@ -1,0 +1,17 @@
+name: Performer URL Aliases
+description: Extracts usernames from performer social media URLs and adds them as aliases
+version: 1.0.0
+url: https://github.com/thismanyboyfriends2/stash-plugins
+exec:
+  - python3
+  - "{pluginDir}/performer_url_aliases.py"
+interface: raw
+tasks:
+  - name: Preview Alias Extraction
+    description: Shows what aliases would be extracted from performer URLs without applying them
+    defaultArgs:
+      mode: preview
+  - name: Extract Aliases from URLs
+    description: Extracts usernames from performer URLs and adds them as aliases
+    defaultArgs:
+      mode: apply
