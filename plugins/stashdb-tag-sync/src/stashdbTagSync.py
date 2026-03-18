@@ -56,8 +56,8 @@ async def fetch_stashdb_config(stash_client: StashClient) -> tuple[str, str]:
             api_key = box.get('api_key', '')
             endpoint = box.get('endpoint', '')
 
-            # Match by name containing 'stash' (case insensitive)
-            if api_key and endpoint and 'stash' in name.lower():
+            # Match by endpoint containing '://stashdb.org' (case insensitive)
+            if api_key and endpoint and '://stashdb.org' in endpoint.lower():
                 log.info(f"Found StashDB configuration: {name}")
                 return (api_key, endpoint)
 
