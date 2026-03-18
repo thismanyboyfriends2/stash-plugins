@@ -1,0 +1,22 @@
+name: Scene Title to Filename
+description: Batch renames scene files on disk to match their Stash title
+version: 1.0.0
+url: https://github.com/thismanyboyfriends2/stash-plugins
+exec:
+  - python3
+  - "{pluginDir}/scene_title_to_filename.py"
+interface: raw
+settings:
+  pathFilter:
+    displayName: Path Filter
+    description: "Only rename scenes whose file path contains this value (e.g. /data/import/)"
+    type: STRING
+tasks:
+  - name: Preview Renames
+    description: Dry run — logs all planned renames without touching files
+    defaultArgs:
+      mode: preview
+  - name: Rename Scene Files
+    description: Renames scene files to match their Stash title using moveFiles
+    defaultArgs:
+      mode: apply
