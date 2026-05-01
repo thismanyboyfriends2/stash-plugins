@@ -1,0 +1,38 @@
+name: Auto-Merge Duplicates
+description: Automatically merges phash duplicate scenes detected by Stash, keeping the scene with the most metadata as the destination.
+version: 1.0.0
+url: https://github.com/thismanyboyfriends2/stash-plugins
+exec:
+  - python3
+  - "{pluginDir}/auto_merge_duplicates.py"
+interface: raw
+settings:
+  matchDistance:
+    displayName: Match Distance
+    description: "Phash similarity threshold: 0=exact, 1=high, 2=medium, 3=low. Lower is stricter."
+    type: NUMBER
+  preferHigherRes:
+    displayName: Prefer Higher Resolution
+    description: "When scoring is tied, prefer the scene with the highest resolution as destination."
+    type: BOOLEAN
+  mergePlayHistory:
+    displayName: Merge Play History
+    description: "Combine play history from all scenes in the group into the destination."
+    type: BOOLEAN
+  mergeOHistory:
+    displayName: Merge O-Counter History
+    description: "Combine o-counter history from all scenes in the group into the destination."
+    type: BOOLEAN
+  dryRun:
+    displayName: Dry Run
+    description: "Preview all planned merges without executing them. Overrides the Auto-Merge Duplicates task."
+    type: BOOLEAN
+tasks:
+  - name: Preview Duplicates
+    description: "Dry run — logs all duplicate groups and which scene would be kept, without merging."
+    defaultArgs:
+      mode: preview
+  - name: Auto-Merge Duplicates
+    description: "Merges all detected duplicate groups. The scene with the most metadata is kept; others are merged into it."
+    defaultArgs:
+      mode: apply
