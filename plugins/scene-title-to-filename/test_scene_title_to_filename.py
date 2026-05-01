@@ -3,9 +3,9 @@ import pytest
 from scene_title_to_filename import sanitize_filename, plan_renames
 
 
-def _scene(id, title, files):
+def _scene(id, title, files, studio=None):
     """Helper to build a scene dict."""
-    return {"id": id, "title": title, "files": files}
+    return {"id": id, "title": title, "files": files, "studio": studio}
 
 
 def _file(id, path):
@@ -172,3 +172,47 @@ class TestPlanRenames:
         renames, skipped = plan_renames(scenes)
         assert len(renames) == 0
         assert any(s["reason"] == "no_title" for s in skipped)
+
+
+class TestPrependStudio:
+    def test_prepend_studio_name(self):
+        scenes = [_scene("1", "Hot Scene", [_file("f1", "/data/import/old.mp4")], studio={"name": "Brazzers"})]
+        renames, _ = plan_renames(scenes, prepend_studio=True)
+        assert renames[0]["new_basename"] == "Brazzers - Hot Scene.mp4"
+
+    def test_prepend_studio_disabled_by_default(self):
+        scenes = [_scene("1", "Hot Scene", [_file("f1", "/data/import/old.mp4")], studio={"name": "Brazzers"})]
+        renames, _ = plan_renames(scenes)
+        assert renames[0]["new_basename"] == "Hot Scene.mp4"
+
+    def test_no_studio_assigned(self):
+        scenes = [_scene("1", "Hot Scene", [_file("f1", "/data/import/old.mp4")])]
+        renames, _ = plan_renames(scenes, prepend_studio=True)
+        assert renames[0]["new_basename"] == "Hot Scene.mp4"
+
+    def test_studio_null(self):
+        scenes = [_scene("1", "Hot Scene", [_file("f1", "/data/import/old.mp4")], studio=None)]
+        renames, _ = plan_renames(scenes, prepend_studio=True)
+        assert renames[0]["new_basename"] == "Hot Scene.mp4"
+
+    def test_studio_with_illegal_chars(self):
+        scenes = [_scene("1", "Title", [_file("f1", "/data/import/old.mp4")], studio={"name": 'Studio: "Best"'})]
+        renames, _ = plan_renames(scenes, prepend_studio=True)
+        assert renames[0]["new_basename"] == "Studio Best - Title.mp4"
+
+    def test_already_correct_with_studio(self):
+        scenes = [_scene("1", "Title", [_file("f1", "/data/import/Brazzers - Title.mp4")], studio={"name": "Brazzers"})]
+        renames, skipped = plan_renames(scenes, prepend_studio=True)
+        assert len(renames) == 0
+        assert any(s["reason"] == "already_correct" for s in skipped)
+
+    def test_conflict_with_studio(self):
+        scenes = [
+            _scene("1", "Title", [_file("f1", "/data/import/a.mp4")], studio={"name": "Studio"}),
+            _scene("2", "Title", [_file("f2", "/data/import/b.mp4")], studio={"name": "Studio"}),
+        ]
+        renames, _ = plan_renames(scenes, prepend_studio=True)
+        assert len(renames) == 2
+        basenames = {r["new_basename"] for r in renames}
+        assert "Studio - Title.mp4" in basenames
+        assert "Studio - Title (1).mp4" in basenames
