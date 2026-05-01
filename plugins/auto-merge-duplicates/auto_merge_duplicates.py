@@ -68,7 +68,9 @@ def _scene_score(scene, prefer_higher_res):
         duration = max((f.get("duration") or 0.0) for f in files)
 
     res_key = resolution if prefer_higher_res else 0
-    return (metadata_score, res_key, duration)
+    # scene id as final tiebreaker so destination selection is deterministic
+    # across repeated runs regardless of API return order
+    return (metadata_score, res_key, duration, -int(scene.get("id", 0)))
 
 
 def pick_destination(group, prefer_higher_res):
@@ -77,7 +79,11 @@ def pick_destination(group, prefer_higher_res):
 
 
 def process_duplicates(stash, settings, dry_run):
-    distance = int(float(settings.get("matchDistance") or 0))
+    try:
+        distance = int(float(settings.get("matchDistance") or 0))
+    except (ValueError, TypeError):
+        log.warning("Invalid matchDistance setting — defaulting to 0 (exact match).")
+        distance = 0
     prefer_higher_res = bool(settings.get("preferHigherRes", False))
     merge_play_history = bool(settings.get("mergePlayHistory", False))
     merge_o_history = bool(settings.get("mergeOHistory", False))
@@ -94,7 +100,11 @@ def process_duplicates(stash, settings, dry_run):
         log.error(f"Failed to fetch duplicate groups: {e}")
         return
 
-    groups = result.get("findDuplicateScenes") or []
+    raw_groups = result.get("findDuplicateScenes")
+    if raw_groups is None:
+        log.error("Empty response from findDuplicateScenes — possible GraphQL error.")
+        return
+    groups = raw_groups
 
     if not groups:
         log.info("No duplicate groups found.")
