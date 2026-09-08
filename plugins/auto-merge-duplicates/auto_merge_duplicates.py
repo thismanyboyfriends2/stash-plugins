@@ -69,8 +69,6 @@ def _scene_score(scene, prefer_higher_res):
         duration = max((f.get("duration") or 0.0) for f in files)
 
     res_key = resolution if prefer_higher_res else 0
-    # scene id as final tiebreaker so destination selection is deterministic
-    # across repeated runs regardless of API return order
     return (metadata_score, res_key, duration, -int(scene.get("id", 0)))
 
 
