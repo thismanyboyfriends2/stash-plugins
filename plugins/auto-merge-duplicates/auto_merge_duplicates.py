@@ -45,10 +45,11 @@ mutation SceneMerge($input: SceneMergeInput!) {
 
 
 def _scene_score(scene, prefer_higher_res):
-    """Return a (metadata_score, resolution, duration) tuple for ranking.
+    """Return a (metadata_score, resolution, duration, -scene_id) tuple for ranking.
 
     Higher metadata score = more reasons to keep this scene. Resolution and
-    duration are used as tiebreakers when scores are equal.
+    duration are used as tiebreakers when scores are equal, and scene id
+    (negated) is the final tiebreaker so destination selection is deterministic.
     """
     metadata_score = 0
     if scene.get("title"):
