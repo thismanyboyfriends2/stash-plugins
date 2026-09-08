@@ -11,6 +11,10 @@ settings:
     displayName: Path Filter
     description: "Only rename scenes whose file path contains this value (e.g. /data/import/)"
     type: STRING
+  prependStudio:
+    displayName: Prepend Studio Name
+    description: "Prefix filename with studio name (e.g. 'Studio Name - Title.ext')"
+    type: BOOLEAN
 tasks:
   - name: Preview Renames
     description: Dry run — logs all planned renames without touching files

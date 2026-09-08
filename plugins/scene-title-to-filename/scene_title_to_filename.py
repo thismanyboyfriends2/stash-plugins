@@ -27,6 +27,9 @@ query FindScenes($filter: FindFilterType!, $scene_filter: SceneFilterType) {
     scenes {
       id
       title
+      studio {
+        name
+      }
       files {
         id
         path
@@ -93,7 +96,7 @@ def find_scenes(stash, path_filter):
     return filtered
 
 
-def plan_renames(scenes):
+def plan_renames(scenes, prepend_studio=False):
     """Build a list of planned renames, handling conflicts and edge cases.
 
     Returns (renames, skipped) where:
@@ -109,6 +112,7 @@ def plan_renames(scenes):
         scene_id = scene["id"]
         title = scene.get("title") or ""
         files = scene.get("files") or []
+        studio_name = (scene.get("studio") or {}).get("name", "") if prepend_studio else ""
 
         if not title.strip():
             skipped.append({
@@ -148,6 +152,11 @@ def plan_renames(scenes):
                 "detail": f"Scene {scene_id} title '{title}' is empty after sanitizing",
             })
             continue
+
+        if studio_name:
+            sanitized_studio = sanitize_filename(studio_name)
+            if sanitized_studio:
+                sanitized = f"{sanitized_studio} - {sanitized}"
 
         new_basename = sanitized + ext
 
@@ -219,7 +228,7 @@ def execute_renames(stash, renames):
     return succeeded, failed
 
 
-def process_scenes(stash, path_filter, dry_run=True):
+def process_scenes(stash, path_filter, dry_run=True, prepend_studio=False):
     """Main processing pipeline."""
     log.info(f"Fetching scenes matching path: {path_filter}")
 
@@ -230,7 +239,7 @@ def process_scenes(stash, path_filter, dry_run=True):
         log.info("No scenes found — nothing to do")
         return
 
-    renames, skipped = plan_renames(scenes)
+    renames, skipped = plan_renames(scenes, prepend_studio=prepend_studio)
 
     # Log skipped scenes by category
     skip_reasons = {}
@@ -291,6 +300,7 @@ def main():
 
     plugin_settings = stash.get_configuration().get("plugins", {}).get("scene-title-to-filename", {})
     path_filter = (plugin_settings.get("pathFilter") or "").strip()
+    prepend_studio = plugin_settings.get("prependStudio", False)
 
     mode = json_input.get("args", {}).get("mode", "preview")
 
@@ -301,9 +311,9 @@ def main():
         return
 
     if mode == "preview":
-        process_scenes(stash, path_filter, dry_run=True)
+        process_scenes(stash, path_filter, dry_run=True, prepend_studio=prepend_studio)
     elif mode == "apply":
-        process_scenes(stash, path_filter, dry_run=False)
+        process_scenes(stash, path_filter, dry_run=False, prepend_studio=prepend_studio)
     else:
         log.error(f"Unknown mode: {mode}")
 
