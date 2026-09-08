@@ -121,6 +121,10 @@ async def plugin_main(input_data: Dict[str, Any]) -> None:
     server_conn = input_data.get("server_connection", {})
     api_key = resolve_api_key(server_conn)
 
+    if not api_key:
+        log.error("No API key available to authenticate with Stash. Configure one in Settings → Security → Authentication")
+        sys.exit(1)
+
     # Create Stash connection to query configuration
     stash_conn = StashConnection(
         scheme=server_conn.get("Scheme", "http"),
@@ -136,20 +140,13 @@ async def plugin_main(input_data: Dict[str, Any]) -> None:
     try:
         log.info("Fetching StashDB configuration from Stash...")
 
-        config_conn = StashConnection(
-            scheme=stash_conn.scheme,
-            host=stash_conn.host,
-            port=stash_conn.port,
-            api_key=api_key
-        )
-
         # Temporarily suppress stash_graphql_client's noisy warnings during config fetch
         import os
         stderr_fd = os.dup(2)
         devnull_fd = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull_fd, 2)
         try:
-            async with StashClient(config_conn) as stash_client:
+            async with StashClient(stash_conn) as stash_client:
                 stashdb_api_key, stashdb_endpoint = await fetch_stashdb_config(stash_client)
         finally:
             os.close(devnull_fd)
