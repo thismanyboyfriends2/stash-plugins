@@ -12,6 +12,7 @@ import stashapi.log as log
 logging.getLogger('stash_graphql_client').setLevel(logging.CRITICAL)
 
 try:
+    from stashapi.stashapp import StashInterface
     from graphql_client import StashDBClient
     from stash_client import StashClient
     from core.tag_transfer import transfer_tags_graphql
@@ -20,6 +21,42 @@ except ImportError as e:
     # If imports fail, output error so Stash can display it
     log.error(f"Import error: {str(e)}")
     sys.exit(1)
+
+
+def resolve_api_key(server_conn: Dict[str, Any]) -> str:
+    """Resolve the Stash API key to use for GraphQL authentication.
+
+    Stash omits `ApiKey` from the connection fragment when the plugin was
+    launched from a cookie-authenticated session rather than an API-key
+    one. This plugin's GraphQL clients only support API-key auth, so in
+    that case the key is fetched directly from Stash's own configuration
+    using `StashInterface`, which accepts whichever auth method (cookie or
+    key) is present in `server_conn`.
+
+    Args:
+        server_conn: The `server_connection` fragment from plugin init
+
+    Returns:
+        The API key to use, or "" if none is available.
+    """
+    api_key = server_conn.get("ApiKey")
+    if api_key:
+        return api_key
+
+    try:
+        stash_client = StashInterface(server_conn)
+        config = stash_client.get_configuration()
+    except Exception as e:
+        log.error(f"Failed to fetch API key from Stash configuration: {e}")
+        return ""
+
+    general = (config or {}).get("general") or {}
+    fetched_key = general.get("apiKey", "")
+    if not fetched_key:
+        log.error("No API key configured in Stash (Settings → Security → Authentication)")
+        return ""
+
+    return fetched_key
 
 
 async def fetch_stashdb_config(stash_client: StashClient) -> tuple[str, str]:
@@ -82,13 +119,14 @@ async def plugin_main(input_data: Dict[str, Any]) -> None:
     """
     # Extract server connection information
     server_conn = input_data.get("server_connection", {})
+    api_key = resolve_api_key(server_conn)
 
     # Create Stash connection to query configuration
     stash_conn = StashConnection(
         scheme=server_conn.get("Scheme", "http"),
         host=server_conn.get("Host", "localhost"),
         port=server_conn.get("Port", 9999),
-        api_key=server_conn.get("ApiKey")
+        api_key=api_key
     )
 
     # Use defaults for other settings
@@ -96,16 +134,13 @@ async def plugin_main(input_data: Dict[str, Any]) -> None:
     ignored_aliases: list = []
 
     try:
-        # Fetch StashDB configuration from Stash (no auth needed for config queries)
         log.info("Fetching StashDB configuration from Stash...")
 
-        # Create connection with blank API key for initial config fetch
-        # (no API key needed to query Stash configuration)
         config_conn = StashConnection(
             scheme=stash_conn.scheme,
             host=stash_conn.host,
             port=stash_conn.port,
-            api_key=""
+            api_key=api_key
         )
 
         # Temporarily suppress stash_graphql_client's noisy warnings during config fetch
