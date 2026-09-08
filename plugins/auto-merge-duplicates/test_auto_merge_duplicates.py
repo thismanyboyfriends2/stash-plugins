@@ -1,6 +1,7 @@
 """Tests for auto_merge_duplicates plugin logic."""
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+import auto_merge_duplicates
 from auto_merge_duplicates import (
     MAX_CONSECUTIVE_ERRORS,
     _scene_score,
@@ -61,6 +62,7 @@ class TestSceneScore:
         shorter = _scene("1", files=[_file(duration=100.0)])
         longer = _scene("2", files=[_file(duration=200.0)])
         assert _scene_score(longer, False) > _scene_score(shorter, False)
+        assert _scene_score(longer, True) > _scene_score(shorter, True)
 
     def test_scene_id_final_tiebreak(self):
         """When every other field ties, the lowest scene id wins (deterministic)."""
@@ -93,14 +95,21 @@ def _make_stash(call_gql_side_effect):
 class TestProcessDuplicatesResponseHandling:
     def test_none_response_treated_as_error(self):
         stash = _make_stash([{"findDuplicateScenes": None}])
-        # Should not raise, and should not attempt any merge call beyond the query.
-        process_duplicates(stash, {}, dry_run=True)
+        with patch.object(auto_merge_duplicates.log, "error") as mock_error, \
+                patch.object(auto_merge_duplicates.log, "info") as mock_info:
+            process_duplicates(stash, {}, dry_run=True)
         assert stash.call_GQL.call_count == 1
+        assert mock_error.called
+        assert not any("No duplicate groups found" in c.args[0] for c in mock_info.call_args_list)
 
     def test_empty_list_is_not_an_error(self):
         stash = _make_stash([{"findDuplicateScenes": []}])
-        process_duplicates(stash, {}, dry_run=True)
+        with patch.object(auto_merge_duplicates.log, "error") as mock_error, \
+                patch.object(auto_merge_duplicates.log, "info") as mock_info:
+            process_duplicates(stash, {}, dry_run=True)
         assert stash.call_GQL.call_count == 1
+        assert not mock_error.called
+        assert any("No duplicate groups found" in c.args[0] for c in mock_info.call_args_list)
 
     def test_groups_with_fewer_than_two_scenes_are_skipped(self):
         stash = _make_stash([{"findDuplicateScenes": [[_scene("1")]]}])
