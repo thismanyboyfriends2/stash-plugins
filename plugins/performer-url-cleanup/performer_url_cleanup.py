@@ -162,8 +162,11 @@ def normalise_url(url):
     if path.endswith('/') and domain not in KEEP_TRAILING_SLASH:
         path = path.rstrip('/')
 
-    # Case handling - only lowercase if site is known to be case-insensitive
-    if domain in LOWERCASE_PATH:
+    # Case handling - only lowercase if site is known to be case-insensitive.
+    # Check the bare domain too: ADD_WWW/DOMAIN_ALIASES may have already
+    # rewritten `domain` to a www-prefixed or aliased form above.
+    bare_domain = domain[4:] if domain.startswith('www.') else domain
+    if domain in LOWERCASE_PATH or bare_domain in LOWERCASE_PATH:
         path = path.lower()
 
     # Reconstruct URL (preserve query string, drop fragment)
