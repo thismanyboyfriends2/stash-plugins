@@ -1,55 +1,73 @@
 """Tests for stashdbTagSync plugin logic."""
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
-from stashdbTagSync import resolve_api_key
+from stashdbTagSync import find_stashdb_box
 
 
-class TestResolveApiKey:
-    def test_returns_api_key_from_connection_fragment_without_fetching(self):
-        with patch("stashdbTagSync.StashInterface") as mock_stash_interface:
-            result = resolve_api_key({"ApiKey": "fragment-key", "Host": "localhost"})
+class TestFindStashdbBox:
+    def test_returns_key_and_endpoint_for_stashdb_box(self):
+        stash = Mock()
+        stash.get_stashbox_connections.return_value = [
+            {"name": "StashDB", "endpoint": "https://stashdb.org/graphql", "api_key": "sdb-key"},
+        ]
 
-        assert result == "fragment-key"
-        mock_stash_interface.assert_not_called()
+        result = find_stashdb_box(stash)
 
-    def test_falls_back_to_stash_configuration_when_fragment_has_no_key(self):
-        mock_client = Mock()
-        mock_client.get_configuration.return_value = {"general": {"apiKey": "configured-key"}}
-        with patch("stashdbTagSync.StashInterface", return_value=mock_client) as mock_stash_interface:
-            result = resolve_api_key({"Host": "localhost", "SessionCookie": {"Value": "abc"}})
+        assert result == ("sdb-key", "https://stashdb.org/graphql")
 
-        assert result == "configured-key"
-        mock_stash_interface.assert_called_once_with({"Host": "localhost", "SessionCookie": {"Value": "abc"}})
+    def test_ignores_non_stashdb_boxes(self):
+        stash = Mock()
+        stash.get_stashbox_connections.return_value = [
+            {"name": "FansDB", "endpoint": "https://fansdb.cc/graphql", "api_key": "fdb-key"},
+            {"name": "StashDB", "endpoint": "https://stashdb.org/graphql", "api_key": "sdb-key"},
+        ]
 
-    def test_returns_empty_string_when_stash_configuration_has_no_api_key(self):
-        mock_client = Mock()
-        mock_client.get_configuration.return_value = {"general": {"apiKey": ""}}
-        with patch("stashdbTagSync.StashInterface", return_value=mock_client):
-            result = resolve_api_key({"Host": "localhost"})
+        result = find_stashdb_box(stash)
 
-        assert result == ""
+        assert result == ("sdb-key", "https://stashdb.org/graphql")
 
-    def test_returns_empty_string_when_stash_configuration_missing_general_section(self):
-        mock_client = Mock()
-        mock_client.get_configuration.return_value = {}
-        with patch("stashdbTagSync.StashInterface", return_value=mock_client):
-            result = resolve_api_key({"Host": "localhost"})
+    def test_matches_endpoint_case_insensitively(self):
+        stash = Mock()
+        stash.get_stashbox_connections.return_value = [
+            {"name": "StashDB", "endpoint": "https://StashDB.org/graphql", "api_key": "sdb-key"},
+        ]
 
-        assert result == ""
+        result = find_stashdb_box(stash)
 
-    def test_returns_empty_string_when_stash_interface_raises(self):
-        with patch("stashdbTagSync.StashInterface", side_effect=Exception("connection refused")):
-            result = resolve_api_key({"Host": "localhost"})
+        assert result == ("sdb-key", "https://StashDB.org/graphql")
 
-        assert result == ""
+    def test_returns_empty_strings_when_no_boxes_configured(self):
+        stash = Mock()
+        stash.get_stashbox_connections.return_value = []
 
-    def test_never_logs_api_key_material(self):
-        mock_client = Mock()
-        mock_client.get_configuration.return_value = {"general": {"apiKey": "super-secret-key"}}
-        with patch("stashdbTagSync.StashInterface", return_value=mock_client), \
-             patch("stashdbTagSync.log") as mock_log:
-            resolve_api_key({"Host": "localhost"})
+        result = find_stashdb_box(stash)
 
-        for mock_call in mock_log.mock_calls:
-            for arg in list(mock_call.args) + list(mock_call.kwargs.values()):
-                assert "super-secret-key" not in str(arg)
+        assert result == ("", "")
+
+    def test_returns_empty_strings_when_no_stashdb_box_present(self):
+        stash = Mock()
+        stash.get_stashbox_connections.return_value = [
+            {"name": "FansDB", "endpoint": "https://fansdb.cc/graphql", "api_key": "fdb-key"},
+        ]
+
+        result = find_stashdb_box(stash)
+
+        assert result == ("", "")
+
+    def test_returns_empty_strings_when_box_missing_api_key(self):
+        stash = Mock()
+        stash.get_stashbox_connections.return_value = [
+            {"name": "StashDB", "endpoint": "https://stashdb.org/graphql", "api_key": ""},
+        ]
+
+        result = find_stashdb_box(stash)
+
+        assert result == ("", "")
+
+    def test_returns_empty_strings_when_fetch_raises(self):
+        stash = Mock()
+        stash.get_stashbox_connections.side_effect = Exception("connection refused")
+
+        result = find_stashdb_box(stash)
+
+        assert result == ("", "")

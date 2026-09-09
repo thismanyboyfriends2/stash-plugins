@@ -96,7 +96,7 @@ def _is_tag_out_of_sync(stashdb_tag: Tag, existing_tag: dict, ignored_aliases: l
     return False
 
 
-async def transfer_tags_graphql(
+def transfer_tags_graphql(
     client: StashClient,
     tags: List[Tag],
     config: Config
@@ -108,7 +108,7 @@ async def transfer_tags_graphql(
     """
     log.info(f"Starting transfer of {len(tags)} tags to Stash")
 
-    existing_tags_by_name, existing_tags_by_stash_id = await client.find_existing_tags_with_data()
+    existing_tags_by_name, existing_tags_by_stash_id = client.find_existing_tags_with_data()
     log.info(f"Found {len(existing_tags_by_name)} existing tags in Stash")
 
     matched_tags: set = set()
@@ -185,7 +185,7 @@ async def transfer_tags_graphql(
                 new_tags.remove(tag)
 
         if new_tags:
-            created_ids = await client.create_tags_batch(new_tags)
+            created_ids = client.create_tags_batch(new_tags)
             created_count = len(created_ids)
             log.info(f"Successfully created {created_count} new tags")
         else:
@@ -197,7 +197,7 @@ async def transfer_tags_graphql(
     update_failed_count = 0
     if tags_to_update:
         log.info(f"Updating {len(tags_to_update)} matched tags...")
-        updated_count = await client.update_tags_batch(tags_to_update, progress=None, task_id=None)
+        updated_count = client.update_tags_batch(tags_to_update)
         update_failed_count = len(tags_to_update) - updated_count
 
         if updated_count == len(tags_to_update):

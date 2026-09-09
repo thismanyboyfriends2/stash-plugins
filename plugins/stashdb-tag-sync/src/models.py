@@ -41,27 +41,6 @@ class Tag:
 
 
 @dataclass
-class StashConnection:
-    """Configuration for connecting to a local Stash instance via GraphQL."""
-    scheme: str = "http"
-    host: str = "localhost"
-    port: int = 9999
-    api_key: Optional[str] = None
-
-    def to_connection_dict(self) -> dict:
-        """Convert to connection dictionary."""
-        conn = {
-            "Scheme": self.scheme,
-            "Host": self.host,
-            "Port": self.port,
-        }
-        if self.api_key:
-            conn["ApiKey"] = self.api_key
-        return conn
-
-
-
-@dataclass
 class Config:
     """Configuration for the stash tag scraper."""
     stashdb_api_key: str
