@@ -33,7 +33,7 @@ Conventions for plugin code in this repository. These reflect what the existing 
 - `# requires: other-plugin-id, another-id` as a YAML comment declares dependencies. Parsed by `build_site.sh`, not by Stash itself.
 - Every task that mutates data should have a corresponding `preview`/dry-run task (see `performer-url-cleanup`, `scene-title-to-filename`) or a `dryRun` boolean setting (see `auto-merge-duplicates`). Don't ship a destructive task with no way to see what it would do first.
 - Settings the user must configure (API keys, thresholds, filters) go under `settings:`, each with `displayName`, `description`, and `type` (`STRING`/`NUMBER`/`BOOLEAN`).
-- When adding a new plugin, also add a row to the `## Plugins` table in the root `README.md` (alphabetical by plugin name). It's easy to ship a new plugin directory and forget this — check it before opening the PR.
+- New plugins also get a row in the root `README.md`'s `Plugins` table (alphabetical by name) — it lives outside `plugins/`, so it's easy to miss. Add it before opening the PR.
 
 ## Stash interaction
 
