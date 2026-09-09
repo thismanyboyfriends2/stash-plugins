@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 from stashapi.stashapp import StashInterface
 
 from models import Tag
-from stash_graphql_mutations import UPDATE_TAG_STASH_IDS_MUTATION
+from stash_graphql_mutations import UPDATE_TAG_MUTATION, UPDATE_TAG_STASH_IDS_MUTATION
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +129,13 @@ class StashClient:
                 tag_update['aliases'] = tag.aliases
 
             try:
-                self.stash.update_tag(tag_update)
+                result = self.stash.call_GQL(UPDATE_TAG_MUTATION, {'input': tag_update})
             except Exception as e:
                 logger.error(f"Failed to update tag '{tag.name}' (ID: {tag_id}): {e}")
+                continue
+
+            if not result or not result.get('tagUpdate'):
+                logger.warning(f"Update returned no result for tag '{tag.name}' (ID: {tag_id})")
                 continue
 
             updated_count += 1
