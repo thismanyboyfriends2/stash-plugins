@@ -62,3 +62,37 @@ class TestUpdateTagsBatch:
         client.update_tags_batch([("1", _tag(), [], "stashdb-id-123")])
 
         stash.call_GQL.assert_called_once()
+
+    def test_sends_name_and_new_stash_id_in_a_single_mutation_call(self):
+        stash = Mock()
+        stash.call_GQL.return_value = {'tagUpdate': {'id': '1'}}
+        client = StashClient(stash)
+
+        client.update_tags_batch([("1", _tag(), [], "stashdb-id-123")])
+
+        stash.call_GQL.assert_called_once()
+        _, variables = stash.call_GQL.call_args[0]
+        assert variables['input']['stash_ids'] == [
+            {'endpoint': 'https://stashdb.org/graphql', 'stash_id': 'stashdb-id-123'}
+        ]
+
+    def test_does_not_resend_a_stash_id_already_present(self):
+        stash = Mock()
+        stash.call_GQL.return_value = {'tagUpdate': {'id': '1'}}
+        client = StashClient(stash)
+        existing = [{'endpoint': 'https://stashdb.org/graphql', 'stash_id': 'stashdb-id-123'}]
+
+        client.update_tags_batch([("1", _tag(), existing, "stashdb-id-123")])
+
+        _, variables = stash.call_GQL.call_args[0]
+        assert 'stash_ids' not in variables['input']
+
+    def test_omits_stash_ids_entirely_when_no_stash_id_to_add(self):
+        stash = Mock()
+        stash.call_GQL.return_value = {'tagUpdate': {'id': '1'}}
+        client = StashClient(stash)
+
+        client.update_tags_batch([("1", _tag(), [], None)])
+
+        _, variables = stash.call_GQL.call_args[0]
+        assert 'stash_ids' not in variables['input']
