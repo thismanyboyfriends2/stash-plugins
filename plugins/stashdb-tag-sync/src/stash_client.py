@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 from stashapi.stashapp import StashInterface
 
 from models import Tag
-from stash_graphql_mutations import UPDATE_TAG_MUTATION, UPDATE_TAG_STASH_IDS_MUTATION
+from stash_graphql_mutations import UPDATE_TAG_MUTATION
 
 logger = logging.getLogger(__name__)
 
@@ -75,39 +75,11 @@ class StashClient:
 
         return created_tags
 
-    def update_tag_stash_ids(self, tag_id: str, stash_id_dicts: list) -> bool:
-        """Update only the stash_ids for a tag using a raw GraphQL mutation.
-
-        Args:
-            tag_id: Stash tag ID
-            stash_id_dicts: List of {'endpoint': '...', 'stash_id': '...'} dicts
-
-        Returns:
-            True if successful, False otherwise
-        """
-        if not stash_id_dicts or not tag_id:
-            logger.debug("Skipping stash_ids update: empty dicts or tag_id")
-            return False
-
-        input_data = {
-            'id': tag_id,
-            'stash_ids': stash_id_dicts,
-        }
-
-        try:
-            result = self.stash.call_GQL(UPDATE_TAG_STASH_IDS_MUTATION, {'input': input_data})
-        except Exception as e:
-            logger.error(f"Exception updating stash_ids for tag {tag_id}: {e}")
-            return False
-
-        if not result or 'tagUpdate' not in result:
-            logger.warning(f"stash_ids update missing 'tagUpdate' in response for tag {tag_id}: {result}")
-            return False
-
-        return True
-
     def update_tags_batch(self, tags_with_ids: List[Tuple]) -> int:
-        """Update multiple tags individually with stash_ids, returns count of successful updates.
+        """Update multiple tags, returns count of successful updates.
+
+        Each tag's name/description/aliases and (if a new one needs adding)
+        stash_ids are sent together in a single tagUpdate mutation.
 
         Args:
             tags_with_ids: List of (tag_id, tag, existing_stash_ids, stash_id) tuples
@@ -128,6 +100,16 @@ class StashClient:
             if tag.aliases:
                 tag_update['aliases'] = tag.aliases
 
+            stash_id_added = False
+            if stash_id:
+                existing_stash_id_set = {item.get('stash_id') for item in (existing_stash_ids or [])}
+                if stash_id not in existing_stash_id_set:
+                    tag_update['stash_ids'] = list(existing_stash_ids or []) + [{
+                        'endpoint': 'https://stashdb.org/graphql',
+                        'stash_id': stash_id,
+                    }]
+                    stash_id_added = True
+
             try:
                 result = self.stash.call_GQL(UPDATE_TAG_MUTATION, {'input': tag_update})
             except Exception as e:
@@ -140,19 +122,8 @@ class StashClient:
 
             updated_count += 1
             logger.info(f"Updated tag '{tag.name}' (ID: {tag_id})")
-
-            if stash_id:
-                stash_id_dicts = list(existing_stash_ids or [])
-                stash_id_set = {item.get('stash_id') for item in stash_id_dicts}
-                if stash_id not in stash_id_set:
-                    stash_id_dicts.append({
-                        'endpoint': 'https://stashdb.org/graphql',
-                        'stash_id': stash_id,
-                    })
-                    if self.update_tag_stash_ids(tag_id, stash_id_dicts):
-                        logger.info(f"Added StashDB ID {stash_id} to tag '{tag.name}'")
-                    else:
-                        logger.warning(f"Failed to add StashDB ID {stash_id} to tag '{tag.name}'")
+            if stash_id_added:
+                logger.info(f"Added StashDB ID {stash_id} to tag '{tag.name}'")
 
         logger.info(f"Successfully updated {updated_count} tags")
         return updated_count
