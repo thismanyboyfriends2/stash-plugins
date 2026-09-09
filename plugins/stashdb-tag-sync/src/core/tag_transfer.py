@@ -39,8 +39,7 @@ def _merge_tag_data(stashdb_tag: Tag, existing_tag: dict, ignored_aliases: list[
         description=merged_desc,
         stash_id=stashdb_tag.stash_id,
         aliases=merged_aliases,
-        category=stashdb_tag.category,
-        url=stashdb_tag.url
+        category=stashdb_tag.category
     )
 
 

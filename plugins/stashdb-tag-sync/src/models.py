@@ -11,7 +11,6 @@ class Tag:
     stash_id: str
     aliases: list[str]
     category: Optional[str] = None
-    url: Optional[str] = None  # For internal use during scraping
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Tag':
@@ -34,7 +33,6 @@ class Tag:
             name=data['name'],
             description=data.get('description', ''),
             stash_id=data.get('stash_id', ''),
-            url=data.get('url'),
             aliases=aliases,
             category=data.get('category')
         )
