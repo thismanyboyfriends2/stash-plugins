@@ -2,7 +2,7 @@
 
 import sys
 import json
-from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
 try:
@@ -13,30 +13,70 @@ except ImportError:
     sys.exit(1)
 
 
-class StashBoxURLProcessor(ABC):
-    """Base class for processing StashBox URLs and adding them to Stash entities."""
+@dataclass(frozen=True)
+class EntityConfig:
+    """Everything that differs between the scene and performer StashBox URL pipelines."""
+    entity_type: str        # "scenes" or "performers" - used in the constructed StashBox URL path
+    label: str              # "scene" or "performer" - singular, for logging
+    filter_key: str         # "scene_filter" or "performer_filter"
+    filter_type_name: str   # "SceneFilterType" or "PerformerFilterType"
+    find_query_name: str    # "FindScenes" or "FindPerformers"
+    find_field: str         # "findScenes" or "findPerformers"
+    items_field: str        # "scenes" or "performers"
+    update_mutation_name: str  # "SceneUpdate" or "PerformerUpdate"
+    update_field: str       # "sceneUpdate" or "performerUpdate"
 
-    def __init__(self, stash: StashInterface):
+
+SCENE_CONFIG = EntityConfig(
+    entity_type="scenes",
+    label="scene",
+    filter_key="scene_filter",
+    filter_type_name="SceneFilterType",
+    find_query_name="FindScenes",
+    find_field="findScenes",
+    items_field="scenes",
+    update_mutation_name="SceneUpdate",
+    update_field="sceneUpdate",
+)
+
+PERFORMER_CONFIG = EntityConfig(
+    entity_type="performers",
+    label="performer",
+    filter_key="performer_filter",
+    filter_type_name="PerformerFilterType",
+    find_query_name="FindPerformers",
+    find_field="findPerformers",
+    items_field="performers",
+    update_mutation_name="PerformerUpdate",
+    update_field="performerUpdate",
+)
+
+
+class StashBoxURLProcessor:
+    """Adds StashBox URLs to Stash scenes or performers, per the given EntityConfig."""
+
+    def __init__(self, stash: StashInterface, config: EntityConfig):
         """
-        Initialize the processor with a Stash interface.
+        Initialize the processor with a Stash interface and entity configuration.
 
         Args:
             stash: StashInterface instance for API communication
+            config: EntityConfig describing which entity type to process
         """
         self.stash = stash
+        self.config = config
         self.processed_count = 0
         self.updated_count = 0
         self.skipped_count = 0
         self.error_count = 0
 
-    def construct_stashbox_url(self, endpoint: str, stash_id: str, entity_type: str) -> str:
+    def construct_stashbox_url(self, endpoint: str, stash_id: str) -> Optional[str]:
         """
         Construct a StashBox URL from endpoint and stash_id.
 
         Args:
             endpoint: GraphQL endpoint (e.g., "https://stashdb.org/graphql")
             stash_id: Entity ID in StashBox (e.g., UUID)
-            entity_type: Type of entity ("scenes" or "performers")
 
         Returns:
             Complete StashBox URL (e.g., "https://stashdb.org/scenes/abc-123")
@@ -48,19 +88,17 @@ class StashBoxURLProcessor(ABC):
         try:
             # Remove /graphql suffix if present
             base_url = endpoint.replace("/graphql", "").rstrip("/")
-            url = f"{base_url}/{entity_type}/{stash_id}"
-            return url
+            return f"{base_url}/{self.config.entity_type}/{stash_id}"
         except Exception as e:
             log.error(f"Error constructing StashBox URL: {str(e)}")
             return None
 
-    def extract_urls_from_stashids(self, stash_ids: List[Dict[str, str]], entity_type: str) -> List[str]:
+    def extract_urls_from_stashids(self, stash_ids: List[Dict[str, str]]) -> List[str]:
         """
         Extract StashBox URLs from a list of stash_id objects.
 
         Args:
             stash_ids: List of {"endpoint": "...", "stash_id": "..."} dicts
-            entity_type: Type of entity ("scenes" or "performers")
 
         Returns:
             List of constructed StashBox URLs
@@ -74,7 +112,7 @@ class StashBoxURLProcessor(ABC):
             endpoint = stash_id_obj.get("endpoint")
             stash_id = stash_id_obj.get("stash_id")
 
-            url = self.construct_stashbox_url(endpoint, stash_id, entity_type)
+            url = self.construct_stashbox_url(endpoint, stash_id)
             if url:
                 urls.append(url)
 
@@ -112,88 +150,23 @@ class StashBoxURLProcessor(ABC):
             "errors": self.error_count
         }
 
-    @abstractmethod
-    def process_all(self) -> None:
-        """Process all entities. Must be implemented by subclasses."""
-        pass
-
-
-class SceneProcessor(StashBoxURLProcessor):
-    """Processor for adding StashBox URLs to Stash scenes."""
-
-    def __init__(self, stash: StashInterface):
-        """Initialize with Stash interface."""
-        super().__init__(stash)
-        self.total_scenes_with_stashids = 0
-
-    def process_all(self) -> None:
+    def get_count_with_stashids(self) -> int:
         """
-        Main batch job: Query scenes with StashIDs (filtered server-side) and add StashBox URLs.
-        """
-        log.info("Starting StashBox URL processing for scenes...")
-
-        try:
-            # Get total count of scenes with StashIDs
-            total_with_stashids = self.get_scene_count_with_stashids()
-            log.info(f"Found {total_with_stashids} scenes with StashIDs")
-
-            if total_with_stashids == 0:
-                log.info("No scenes with StashIDs found.")
-                return
-
-            # Process in batches (10000 scenes per request for maximum efficiency)
-            per_page = 10000
-            page = 1
-
-            while self.processed_count < total_with_stashids:
-                try:
-                    scenes = self.query_scenes_with_stashids(page, per_page)
-
-                    if not scenes:
-                        break
-
-                    for scene in scenes:
-                        self.process_scene(scene)
-
-                    page += 1
-
-                    # Update progress bar
-                    log.progress(self.processed_count / total_with_stashids)
-
-                except Exception as e:
-                    log.error(f"Error processing batch on page {page}: {str(e)}")
-                    self.error_count += 1
-                    break
-
-            # Print final summary
-            summary = self.get_summary()
-            log.info(
-                f"Complete! Processed {summary['processed']} scenes, "
-                f"updated {summary['updated']}, skipped {summary['skipped']}, "
-                f"errors {summary['errors']}"
-            )
-
-        except Exception as e:
-            log.error(f"Fatal error during scene processing: {str(e)}")
-            self.error_count += 1
-
-    def get_scene_count_with_stashids(self) -> int:
-        """
-        Get the total count of scenes with StashIDs using GraphQL filter.
+        Get the total count of entities with StashIDs using a GraphQL filter.
 
         Returns:
-            Total count of scenes with StashIDs
+            Total count of entities with StashIDs
         """
-        query = """
-            query FindScenes($scene_filter: SceneFilterType) {
-                findScenes(scene_filter: $scene_filter) {
+        query = f"""
+            query {self.config.find_query_name}(${self.config.filter_key}: {self.config.filter_type_name}) {{
+                {self.config.find_field}({self.config.filter_key}: ${self.config.filter_key}) {{
                     count
-                }
-            }
+                }}
+            }}
         """
 
         variables = {
-            "scene_filter": {
+            self.config.filter_key: {
                 "stash_id_endpoint": {
                     "modifier": "NOT_NULL"
                 }
@@ -204,45 +177,45 @@ class SceneProcessor(StashBoxURLProcessor):
             result = self.stash.callGQL(query, variables)
 
             if result:
-                count = result.get("findScenes", {}).get("count", 0)
-                log.info(f"Scenes with StashIDs count: {count}")
+                count = result.get(self.config.find_field, {}).get("count", 0)
+                log.info(f"{self.config.entity_type.capitalize()} with StashIDs count: {count}")
                 return count
 
             return 0
         except Exception as e:
-            log.error(f"Error getting scene count with stashids: {str(e)}")
+            log.error(f"Error getting {self.config.label} count with stashids: {str(e)}")
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             return 0
 
-    def query_scenes_with_stashids(self, page: int, per_page: int) -> List[Dict[str, Any]]:
+    def query_page_with_stashids(self, page: int, per_page: int) -> List[Dict[str, Any]]:
         """
-        Query scenes that have StashIDs attached using GraphQL filter.
+        Query a page of entities that have StashIDs attached using a GraphQL filter.
 
         Args:
             page: Page number (1-indexed)
             per_page: Results per page
 
         Returns:
-            List of scene objects with id, urls, and stash_ids
+            List of entity objects with id, urls, and stash_ids
         """
-        query = """
-            query FindScenes($scene_filter: SceneFilterType, $filter: FindFilterType) {
-                findScenes(scene_filter: $scene_filter, filter: $filter) {
-                    scenes {
+        query = f"""
+            query {self.config.find_query_name}(${self.config.filter_key}: {self.config.filter_type_name}, $filter: FindFilterType) {{
+                {self.config.find_field}({self.config.filter_key}: ${self.config.filter_key}, filter: $filter) {{
+                    {self.config.items_field} {{
                         id
                         urls
-                        stash_ids {
+                        stash_ids {{
                             endpoint
                             stash_id
-                        }
-                    }
-                }
-            }
+                        }}
+                    }}
+                }}
+            }}
         """
 
         variables = {
-            "scene_filter": {
+            self.config.filter_key: {
                 "stash_id_endpoint": {
                     "modifier": "NOT_NULL"
                 }
@@ -257,36 +230,36 @@ class SceneProcessor(StashBoxURLProcessor):
             result = self.stash.callGQL(query, variables)
 
             if result:
-                scenes = result.get("findScenes", {}).get("scenes", [])
-                log.info(f"Found {len(scenes)} scenes with StashIDs on page {page}")
-                return scenes if scenes else []
+                items = result.get(self.config.find_field, {}).get(self.config.items_field, [])
+                log.info(f"Found {len(items)} {self.config.entity_type} with StashIDs on page {page}")
+                return items if items else []
 
             return []
         except Exception as e:
-            log.error(f"Error querying scenes on page {page}: {str(e)}")
+            log.error(f"Error querying {self.config.entity_type} on page {page}: {str(e)}")
             import traceback
             log.error(f"Traceback: {traceback.format_exc()}")
             raise
 
-    def update_scene_urls(self, scene_id: str, urls: List[str]) -> None:
+    def update_entity_urls(self, entity_id: str, urls: List[str]) -> None:
         """
-        Update a scene's URLs using a custom GraphQL mutation.
+        Update an entity's URLs using a custom GraphQL mutation.
 
         Args:
-            scene_id: ID of the scene to update
+            entity_id: ID of the scene or performer to update
             urls: List of URLs to set
         """
-        mutation = """
-            mutation SceneUpdate($input: SceneUpdateInput!) {
-                sceneUpdate(input: $input) {
+        mutation = f"""
+            mutation {self.config.update_mutation_name}($input: {self.config.update_mutation_name}Input!) {{
+                {self.config.update_field}(input: $input) {{
                     id
-                }
-            }
+                }}
+            }}
         """
 
         variables = {
             "input": {
-                "id": scene_id,
+                "id": entity_id,
                 "urls": urls
             }
         }
@@ -294,38 +267,38 @@ class SceneProcessor(StashBoxURLProcessor):
         try:
             self.stash.callGQL(mutation, variables)
         except Exception as e:
-            log.error(f"Error updating scene {scene_id} URLs: {str(e)}")
+            log.error(f"Error updating {self.config.label} {entity_id} URLs: {str(e)}")
             raise
 
-    def process_scene(self, scene: Dict[str, Any]) -> None:
+    def process_entity(self, entity: Dict[str, Any]) -> None:
         """
-        Process a single scene: extract StashBox URLs and add them to the scene.
+        Process a single entity: extract StashBox URLs and add them to it.
 
         Args:
-            scene: Scene object from Stash API
+            entity: Scene or performer object from Stash API
         """
         self.processed_count += 1
 
         try:
-            scene_id = scene.get("id")
-            stash_ids = scene.get("stash_ids", [])
-            existing_urls = scene.get("urls", [])
+            entity_id = entity.get("id")
+            stash_ids = entity.get("stash_ids", [])
+            existing_urls = entity.get("urls", [])
 
-            if not scene_id:
-                log.warning("Scene missing ID")
+            if not entity_id:
+                log.warning(f"{self.config.label.capitalize()} missing ID")
                 self.skipped_count += 1
                 return
 
             if not stash_ids:
-                log.debug(f"Scene {scene_id} has no StashIDs")
+                log.debug(f"{self.config.label.capitalize()} {entity_id} has no StashIDs")
                 self.skipped_count += 1
                 return
 
             # Extract URLs from StashIDs
-            new_urls = self.extract_urls_from_stashids(stash_ids, "scenes")
+            new_urls = self.extract_urls_from_stashids(stash_ids)
 
             if not new_urls:
-                log.debug(f"Scene {scene_id} has StashIDs but no valid URLs could be constructed")
+                log.debug(f"{self.config.label.capitalize()} {entity_id} has StashIDs but no valid URLs could be constructed")
                 self.skipped_count += 1
                 return
 
@@ -334,56 +307,48 @@ class SceneProcessor(StashBoxURLProcessor):
 
             # Check if anything changed
             if merged_urls == existing_urls:
-                log.debug(f"Scene {scene_id} already has all StashBox URLs")
+                log.debug(f"{self.config.label.capitalize()} {entity_id} already has all StashBox URLs")
                 self.skipped_count += 1
                 return
 
-            # Update scene with merged URLs using custom GraphQL mutation
-            self.update_scene_urls(scene_id, merged_urls)
+            # Update entity with merged URLs using custom GraphQL mutation
+            self.update_entity_urls(entity_id, merged_urls)
 
             self.updated_count += 1
-            log.debug(f"Updated scene {scene_id} with {len(new_urls)} StashBox URL(s)")
+            log.debug(f"Updated {self.config.label} {entity_id} with {len(new_urls)} StashBox URL(s)")
 
         except Exception as e:
-            log.error(f"Error processing scene {scene.get('id', 'unknown')}: {str(e)}")
+            log.error(f"Error processing {self.config.label} {entity.get('id', 'unknown')}: {str(e)}")
             self.error_count += 1
-
-
-class PerformerProcessor(StashBoxURLProcessor):
-    """Processor for adding StashBox URLs to Stash performers."""
-
-    def __init__(self, stash: StashInterface):
-        """Initialize with Stash interface."""
-        super().__init__(stash)
 
     def process_all(self) -> None:
         """
-        Main batch job: Query performers with StashIDs (filtered server-side) and add StashBox URLs.
+        Main batch job: query entities with StashIDs (filtered server-side) and add StashBox URLs.
         """
-        log.info("Starting StashBox URL processing for performers...")
+        log.info(f"Starting StashBox URL processing for {self.config.entity_type}...")
 
         try:
-            # Get total count of performers with StashIDs
-            total_with_stashids = self.get_performer_count_with_stashids()
-            log.info(f"Found {total_with_stashids} performers with StashIDs")
+            # Get total count of entities with StashIDs
+            total_with_stashids = self.get_count_with_stashids()
+            log.info(f"Found {total_with_stashids} {self.config.entity_type} with StashIDs")
 
             if total_with_stashids == 0:
-                log.info("No performers with StashIDs found.")
+                log.info(f"No {self.config.entity_type} with StashIDs found.")
                 return
 
-            # Process in batches (10000 performers per request for maximum efficiency)
+            # Process in batches (10000 per request for maximum efficiency)
             per_page = 10000
             page = 1
 
             while self.processed_count < total_with_stashids:
                 try:
-                    performers = self.query_performers_with_stashids(page, per_page)
+                    items = self.query_page_with_stashids(page, per_page)
 
-                    if not performers:
+                    if not items:
                         break
 
-                    for performer in performers:
-                        self.process_performer(performer)
+                    for item in items:
+                        self.process_entity(item)
 
                     page += 1
 
@@ -398,184 +363,13 @@ class PerformerProcessor(StashBoxURLProcessor):
             # Print final summary
             summary = self.get_summary()
             log.info(
-                f"Complete! Processed {summary['processed']} performers, "
+                f"Complete! Processed {summary['processed']} {self.config.entity_type}, "
                 f"updated {summary['updated']}, skipped {summary['skipped']}, "
                 f"errors {summary['errors']}"
             )
 
         except Exception as e:
-            log.error(f"Fatal error during performer processing: {str(e)}")
-            self.error_count += 1
-
-    def get_performer_count_with_stashids(self) -> int:
-        """
-        Get the total count of performers with StashIDs using GraphQL filter.
-
-        Returns:
-            Total count of performers with StashIDs
-        """
-        query = """
-            query FindPerformers($performer_filter: PerformerFilterType) {
-                findPerformers(performer_filter: $performer_filter) {
-                    count
-                }
-            }
-        """
-
-        variables = {
-            "performer_filter": {
-                "stash_id_endpoint": {
-                    "modifier": "NOT_NULL"
-                }
-            }
-        }
-
-        try:
-            result = self.stash.callGQL(query, variables)
-
-            if result:
-                count = result.get("findPerformers", {}).get("count", 0)
-                log.info(f"Performers with StashIDs count: {count}")
-                return count
-
-            return 0
-        except Exception as e:
-            log.error(f"Error getting performer count with stashids: {str(e)}")
-            import traceback
-            log.error(f"Traceback: {traceback.format_exc()}")
-            return 0
-
-    def query_performers_with_stashids(self, page: int, per_page: int) -> List[Dict[str, Any]]:
-        """
-        Query performers that have StashIDs attached using GraphQL filter.
-
-        Args:
-            page: Page number (1-indexed)
-            per_page: Results per page
-
-        Returns:
-            List of performer objects with id, urls, and stash_ids
-        """
-        query = """
-            query FindPerformers($performer_filter: PerformerFilterType, $filter: FindFilterType) {
-                findPerformers(performer_filter: $performer_filter, filter: $filter) {
-                    performers {
-                        id
-                        urls
-                        stash_ids {
-                            endpoint
-                            stash_id
-                        }
-                    }
-                }
-            }
-        """
-
-        variables = {
-            "performer_filter": {
-                "stash_id_endpoint": {
-                    "modifier": "NOT_NULL"
-                }
-            },
-            "filter": {
-                "page": page,
-                "per_page": per_page
-            }
-        }
-
-        try:
-            result = self.stash.callGQL(query, variables)
-
-            if result:
-                performers = result.get("findPerformers", {}).get("performers", [])
-                log.info(f"Found {len(performers)} performers with StashIDs on page {page}")
-                return performers if performers else []
-
-            return []
-        except Exception as e:
-            log.error(f"Error querying performers on page {page}: {str(e)}")
-            import traceback
-            log.error(f"Traceback: {traceback.format_exc()}")
-            raise
-
-    def update_performer_urls(self, performer_id: str, urls: List[str]) -> None:
-        """
-        Update a performer's URLs using a custom GraphQL mutation.
-
-        Args:
-            performer_id: ID of the performer to update
-            urls: List of URLs to set
-        """
-        mutation = """
-            mutation PerformerUpdate($input: PerformerUpdateInput!) {
-                performerUpdate(input: $input) {
-                    id
-                }
-            }
-        """
-
-        variables = {
-            "input": {
-                "id": performer_id,
-                "urls": urls
-            }
-        }
-
-        try:
-            self.stash.callGQL(mutation, variables)
-        except Exception as e:
-            log.error(f"Error updating performer {performer_id} URLs: {str(e)}")
-            raise
-
-    def process_performer(self, performer: Dict[str, Any]) -> None:
-        """
-        Process a single performer: extract StashBox URLs and add them to the performer.
-
-        Args:
-            performer: Performer object from Stash API
-        """
-        self.processed_count += 1
-
-        try:
-            performer_id = performer.get("id")
-            stash_ids = performer.get("stash_ids", [])
-            existing_urls = performer.get("urls", [])
-
-            if not performer_id:
-                log.warning("Performer missing ID")
-                self.skipped_count += 1
-                return
-
-            if not stash_ids:
-                log.debug(f"Performer {performer_id} has no StashIDs")
-                self.skipped_count += 1
-                return
-
-            # Extract URLs from StashIDs
-            new_urls = self.extract_urls_from_stashids(stash_ids, "performers")
-
-            if not new_urls:
-                log.debug(f"Performer {performer_id} has StashIDs but no valid URLs could be constructed")
-                self.skipped_count += 1
-                return
-
-            # Merge with existing URLs
-            merged_urls = self.merge_urls(existing_urls, new_urls)
-
-            # Check if anything changed
-            if merged_urls == existing_urls:
-                log.debug(f"Performer {performer_id} already has all StashBox URLs")
-                self.skipped_count += 1
-                return
-
-            # Update performer with merged URLs using custom GraphQL mutation
-            self.update_performer_urls(performer_id, merged_urls)
-
-            self.updated_count += 1
-            log.debug(f"Updated performer {performer_id} with {len(new_urls)} StashBox URL(s)")
-
-        except Exception as e:
-            log.error(f"Error processing performer {performer.get('id', 'unknown')}: {str(e)}")
+            log.error(f"Fatal error during {self.config.label} processing: {str(e)}")
             self.error_count += 1
 
 
@@ -599,10 +393,10 @@ def main():
 
         # Route to appropriate handler
         if mode == "process_scenes":
-            processor = SceneProcessor(stash)
+            processor = StashBoxURLProcessor(stash, SCENE_CONFIG)
             processor.process_all()
         elif mode == "process_performers":
-            processor = PerformerProcessor(stash)
+            processor = StashBoxURLProcessor(stash, PERFORMER_CONFIG)
             processor.process_all()
         else:
             log.error(f"Unknown mode: {mode}")
