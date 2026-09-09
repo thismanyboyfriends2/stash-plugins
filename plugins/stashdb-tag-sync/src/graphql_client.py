@@ -230,8 +230,7 @@ class StashDBClient:
             description=tag_data.get('description') or '',
             stash_id=stash_id,
             aliases=tag_data.get('aliases', []),
-            category=category_name,
-            url=f"https://stashdb.org/tags/{stash_id}"
+            category=category_name
         )
 
     def _tag_from_graphql_dict(self, tag_data: Dict) -> Tag:
