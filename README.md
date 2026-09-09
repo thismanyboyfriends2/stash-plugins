@@ -18,11 +18,16 @@ The plugins will appear in the Available Plugins list.
 
 | Plugin | Description |
 |--------|-------------|
+| **Auto-Merge Duplicates** | Automatically merges phash duplicate scenes detected by Stash, keeping the scene with the most metadata as the destination. Configurable match distance, resolution preference, and play history merging. |
 | **Copy StashBox URLs** | Extracts StashBox URLs from StashIDs and adds them to scene and performer URL fields. |
 | **Performer URL Aliases** | Extracts usernames from performer social media URLs (OnlyFans, X/Twitter, Instagram, Fansly, TikTok, LoyalFans, Linktree) and adds them as aliases. Case-insensitive deduplication against existing aliases. |
 | **Performer URL Cleanup** | Normalises, deduplicates, and sorts performer URLs. Includes preview mode to review changes before applying. |
 | **Scene Title to Filename** | Batch renames scene files on disk to match their Stash title. Configurable path filter, conflict detection, preview/apply modes. |
 | **StashDB Tag Synchroniser** | Synchronises tags from StashDB to your local Stash instance. Three-stage matching (stash_id → name → create new), 24-hour caching, case-insensitive matching, configurable alias exclusions. Requires Python 3.12+ and StashDB API key. |
+
+## Contributing
+
+Agent-facing conventions (build commands, plugin structure, issue tracker, triage labels) live in [AGENTS.md](AGENTS.md).
 
 ## Licence
 
