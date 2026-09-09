@@ -1,6 +1,6 @@
 name: Scene Title Cleanup
 description: Strips trailing resolution/quality suffixes (e.g. "(720 HD)", "(1080 HD)") from scene titles
-version: 1.0.0
+version: 1.0.1
 url: https://github.com/thismanyboyfriends2/stash-plugins
 exec:
   - python3

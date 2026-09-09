@@ -43,6 +43,21 @@ class TestCleanTitle:
         assert new_title == "Lick My Fresh Young Asshole (Ass Worship)"
         assert changed is False
 
+    def test_leaves_release_year_untouched(self):
+        # A bare 3-4 digit number in parens (a year) has the same shape as a
+        # resolution number with its qualifier stripped - must not match.
+        new_title, changed = clean_title("Rico Strong & Annette Schwarz: Butthole Whores (2008)")
+
+        assert new_title == "Rico Strong & Annette Schwarz: Butthole Whores (2008)"
+        assert changed is False
+
+    def test_leaves_other_bare_years_untouched(self):
+        for year in ("1999", "2160", "720", "480"):
+            new_title, changed = clean_title(f"Some Title ({year})")
+
+            assert new_title == f"Some Title ({year})"
+            assert changed is False
+
     def test_leaves_title_with_no_suffix_untouched(self):
         new_title, changed = clean_title("Plain Title")
 
