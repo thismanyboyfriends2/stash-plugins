@@ -1,6 +1,6 @@
 name: StashDB Tag Synchroniser
 description: Synchronises tags from StashDB to your local Stash instance via GraphQL
-version: 1.0.3
+version: 1.0.4
 url: https://github.com/thismanyboyfriends2/stash-plugins
 exec:
   - python3
