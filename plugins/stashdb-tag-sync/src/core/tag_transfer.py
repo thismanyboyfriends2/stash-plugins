@@ -1,6 +1,7 @@
 """Core tag transfer logic for plugin."""
 import logging
-from typing import List
+from dataclasses import dataclass
+from typing import Callable, List, Optional
 
 from models import Tag, Config
 from stash_client import StashClient
@@ -95,6 +96,102 @@ def _is_tag_out_of_sync(stashdb_tag: Tag, existing_tag: dict, ignored_aliases: l
     return False
 
 
+@dataclass
+class _MatchState:
+    """Shared, mutated-in-place state threaded through both matching stages."""
+    existing_tags_by_name: dict
+    ignored_aliases: list
+    matched_tags: set
+    tags_to_update: list
+
+
+def _match(
+    tags: List[Tag],
+    lookup: dict,
+    key_fn: Callable[[Tag], Optional[str]],
+    state: _MatchState,
+    reject_blank_name: bool = False,
+) -> tuple[int, int, int]:
+    """Match tags against `lookup` by `key_fn(tag)`, merging/updating/marking matched as needed.
+
+    Shared by the stash_id and name matching stages - only the lookup dict,
+    key function, and `reject_blank_name` differ between them. A tag already
+    present in `state.matched_tags` (from an earlier stage) is skipped so
+    it's never re-matched. `state.matched_tags` and `state.tags_to_update`
+    are mutated in place.
+
+    `reject_blank_name` preserves a pre-existing asymmetry between the two
+    original stages: the stash_id stage validated the matched tag's name
+    before updating it (its own outer condition never checked `tag.name`,
+    so a stash_id match could still carry a blank name), while the name
+    stage never needed to - its outer condition already required a
+    non-blank `tag.name` to compute the lookup key in the first place, so a
+    tag with a whitespace-only name was matched and updated same as any
+    other. Passing `reject_blank_name=True` only for the stash_id stage
+    keeps that original difference intact.
+
+    Returns (matches, skipped, failed) counts for this stage:
+    - matches: matched and needs an update
+    - skipped: matched but rejected for a blank name (stash_id stage only)
+    - failed: matched but the merge would create an alias conflict
+    """
+    matches = 0
+    skipped = 0
+    failed = 0
+
+    for tag in tags:
+        name_key = tag.name.lower() if tag.name else None
+        if name_key is not None and name_key in state.matched_tags:
+            continue
+
+        key = key_fn(tag)
+        if key is None or key not in lookup:
+            continue
+
+        if reject_blank_name and (not tag.name or not tag.name.strip()):
+            log.warning(f"Tag with key {key!r} has no name - skipping to prevent invalid update")
+            skipped += 1
+            continue
+
+        existing_tag = lookup[key]
+        if _is_tag_out_of_sync(tag, existing_tag, state.ignored_aliases):
+            merged_tag = _merge_tag_data(tag, existing_tag, state.ignored_aliases)
+
+            conflicts = _has_alias_conflicts(merged_tag, state.existing_tags_by_name, state.ignored_aliases)
+            if conflicts:
+                log.warning(f"Cannot update '{tag.name}' - aliases {conflicts} already exist as tag names")
+                failed += 1
+            else:
+                state.tags_to_update.append(
+                    (existing_tag['id'], merged_tag, existing_tag.get('stash_ids', []), tag.stash_id)
+                )
+                log.debug(f"  Matched '{tag.name}' - needs update")
+                matches += 1
+        else:
+            log.debug(f"  Matched '{tag.name}' - in sync")
+
+        state.matched_tags.add(name_key)
+
+    return matches, skipped, failed
+
+
+def _filter_new_tags(new_tags: List[Tag], existing_tags_by_name: dict) -> List[Tag]:
+    """Drop any tag that already exists by name - an idempotency safety net.
+
+    Should be a no-op in practice, since the name-match stage already covers
+    everything in existing_tags_by_name. Builds a new list rather than
+    mutating `new_tags` while iterating it, so consecutive matches are never
+    silently skipped.
+    """
+    filtered = []
+    for tag in new_tags:
+        if tag.name.lower() in existing_tags_by_name:
+            log.warning(f"Tag '{tag.name}' already exists but wasn't matched - skipping to prevent duplicate")
+        else:
+            filtered.append(tag)
+    return filtered
+
+
 def transfer_tags_graphql(
     client: StashClient,
     tags: List[Tag],
@@ -110,64 +207,33 @@ def transfer_tags_graphql(
     existing_tags_by_name, existing_tags_by_stash_id = client.find_existing_tags_with_data()
     log.info(f"Found {len(existing_tags_by_name)} existing tags in Stash")
 
-    matched_tags: set = set()
-    tags_to_update = []
-    skipped_tags = 0
-    failed_tags = 0
+    state = _MatchState(
+        existing_tags_by_name=existing_tags_by_name,
+        ignored_aliases=config.ignored_aliases,
+        matched_tags=set(),
+        tags_to_update=[],
+    )
 
     # Stage 1: Match by stash_id (most reliable)
     log.info("Stage 1: Matching tags by stash_id...")
-    stage1_matches = 0
-    for tag in tags:
-        if tag.stash_id and tag.stash_id in existing_tags_by_stash_id:
-            if not tag.name or not tag.name.strip():
-                log.warning(f"Tag with stash_id {tag.stash_id} has no name - skipping to prevent invalid update")
-                skipped_tags += 1
-                continue
-
-            existing_tag = existing_tags_by_stash_id[tag.stash_id]
-            if _is_tag_out_of_sync(tag, existing_tag, config.ignored_aliases):
-                merged_tag = _merge_tag_data(tag, existing_tag, config.ignored_aliases)
-
-                # Check for alias conflicts before updating
-                conflicts = _has_alias_conflicts(merged_tag, existing_tags_by_name, config.ignored_aliases)
-                if conflicts:
-                    log.warning(f"Cannot update '{tag.name}' - aliases {conflicts} already exist as tag names")
-                    failed_tags += 1
-                else:
-                    tags_to_update.append((existing_tag['id'], merged_tag, existing_tag.get('stash_ids', []), tag.stash_id))
-                    log.debug(f"  Matched '{tag.name}' by stash_id {tag.stash_id} - needs update")
-                    stage1_matches += 1
-            else:
-                log.debug(f"  Matched '{tag.name}' by stash_id {tag.stash_id} - in sync")
-            matched_tags.add(tag.name.lower())
-
+    stage1_matches, skipped_tags, stage1_failed = _match(
+        tags, existing_tags_by_stash_id, lambda t: t.stash_id or None,
+        state, reject_blank_name=True,
+    )
     log.info(f"Stage 1: Found {stage1_matches} tags to update by stash_id")
 
-    # Stage 2: Match remaining tags by name and description/aliases (case-insensitive)
+    # Stage 2: Match remaining tags by name (case-insensitive)
     log.info("Stage 2: Matching remaining tags by name...")
-    stage2_matches = 0
-    for tag in tags:
-        if tag.name and tag.name.lower() not in matched_tags:
-            if tag.name.lower() in existing_tags_by_name:
-                existing_tag = existing_tags_by_name[tag.name.lower()]
-                if _is_tag_out_of_sync(tag, existing_tag, config.ignored_aliases):
-                    merged_tag = _merge_tag_data(tag, existing_tag, config.ignored_aliases)
-
-                    # Check for alias conflicts before updating
-                    conflicts = _has_alias_conflicts(merged_tag, existing_tags_by_name, config.ignored_aliases)
-                    if conflicts:
-                        log.warning(f"Cannot update '{tag.name}' - aliases {conflicts} already exist as tag names")
-                        failed_tags += 1
-                    else:
-                        tags_to_update.append((existing_tag['id'], merged_tag, existing_tag.get('stash_ids', []), tag.stash_id))
-                        log.debug(f"  Matched '{tag.name}' by name - needs update")
-                        stage2_matches += 1
-                else:
-                    log.debug(f"  Matched '{tag.name}' by name - in sync")
-                matched_tags.add(tag.name.lower())
-
+    stage2_matches, _, stage2_failed = _match(
+        tags, existing_tags_by_name, lambda t: t.name.lower() if t.name else None,
+        state,
+    )
     log.info(f"Stage 2: Found {stage2_matches} tags to update by name")
+
+    matched_tags = state.matched_tags
+    tags_to_update = state.tags_to_update
+
+    failed_tags = stage1_failed + stage2_failed
 
     new_tags = [
         tag for tag in tags
@@ -178,14 +244,7 @@ def transfer_tags_graphql(
     create_failed_count = 0
     log.info(f"Stage 3: Creating {len(new_tags)} new tags")
     if new_tags:
-        # Idempotency check: warn if any new tag names already exist (shouldn't happen, but safety check)
-        idempotent_new_tags = []
-        for tag in new_tags:
-            if tag.name.lower() in existing_tags_by_name:
-                log.warning(f"Tag '{tag.name}' already exists but wasn't matched - skipping to prevent duplicate")
-            else:
-                idempotent_new_tags.append(tag)
-        new_tags = idempotent_new_tags
+        new_tags = _filter_new_tags(new_tags, existing_tags_by_name)
 
         if new_tags:
             created_ids, create_failed_count = client.create_tags_batch(new_tags)
