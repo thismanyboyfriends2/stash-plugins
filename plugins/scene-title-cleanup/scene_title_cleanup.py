@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 # Number of parallel threads for updates
 PARALLEL_WORKERS = 10
 
-PAGE_SIZE = 1000
+PAGE_SIZE = 5000
 
 # Matches a single trailing "(...)" resolution/quality tag, e.g.
 # "(720 HD)", "(1080 HD)", "(720p)", "(2160p)", "(4K)", "(HD)", "(SD)".
@@ -36,8 +36,8 @@ DEFAULT_SUFFIX_RE = re.compile(
 MAX_STRIP_ITERATIONS = 10
 
 FIND_SCENES_QUERY = """
-query FindScenes($filter: FindFilterType!) {
-  findScenes(filter: $filter) {
+query FindScenes($filter: FindFilterType!, $scene_filter: SceneFilterType) {
+  findScenes(filter: $filter, scene_filter: $scene_filter) {
     count
     scenes {
       id
@@ -50,22 +50,71 @@ query FindScenes($filter: FindFilterType!) {
 }
 """
 
+FIND_STUDIOS_QUERY = """
+query FindStudios($studio_filter: StudioFilterType!) {
+  findStudios(studio_filter: $studio_filter) {
+    studios {
+      id
+    }
+  }
+}
+"""
 
-def parse_extra_suffixes(raw):
-    """Parse a comma-separated setting string into a list of regexes.
 
-    Each extra suffix is matched literally (case-insensitive) when it appears
-    at the end of the title, with any preceding whitespace.
-    """
+def _split_extra_suffixes(raw):
+    """Split a comma-separated setting string into stripped, non-empty suffixes."""
     if not raw:
         return []
-    patterns = []
+    suffixes = []
     for part in raw.split(','):
         suffix = part.strip()
-        if not suffix:
-            continue
-        patterns.append(re.compile(r'\s*' + re.escape(suffix) + r'\s*$', re.IGNORECASE))
-    return patterns
+        if suffix:
+            suffixes.append(suffix)
+    return suffixes
+
+
+def _compile_suffix_patterns(suffixes):
+    """Compile a list of raw suffix strings into trailing-match regexes.
+
+    Each suffix is matched literally (case-insensitive) when it appears at
+    the end of the title, with any preceding whitespace.
+    """
+    return [
+        re.compile(r'\s*' + re.escape(suffix) + r'\s*$', re.IGNORECASE)
+        for suffix in suffixes
+    ]
+
+
+def parse_extra_suffixes(raw):
+    """Parse a comma-separated setting string into a list of regexes."""
+    return _compile_suffix_patterns(_split_extra_suffixes(raw))
+
+
+def build_scene_filter(studio_ids, extra_suffixes):
+    """Build the scene_filter dict to send to findScenes.
+
+    Pure decision logic, no I/O. `studio_ids` is the resolved list of studio
+    IDs to scope to (empty means no studio scoping). `extra_suffixes` is the
+    raw list of configured extraSuffixes strings (not compiled regexes).
+
+    The title prefilter (`title INCLUDES ")"`) is a safe superset of every
+    suffix clean_title can ever strip, so it's included by default - unless
+    a configured extra suffix doesn't end in ")", in which case it's dropped
+    entirely to avoid silently missing a match.
+    """
+    scene_filter = {}
+
+    if studio_ids:
+        scene_filter["studios"] = {
+            "value": list(studio_ids),
+            "modifier": "INCLUDES",
+            "depth": 0,
+        }
+
+    if all(suffix.endswith(')') for suffix in extra_suffixes):
+        scene_filter["title"] = {"value": ")", "modifier": "INCLUDES"}
+
+    return scene_filter
 
 
 def clean_title(title, extra_patterns=None):
@@ -95,14 +144,40 @@ def clean_title(title, extra_patterns=None):
     return current, current != title
 
 
-def find_scenes(stash):
-    """Fetch all scenes with a title, paginated."""
+def find_scenes(stash, studio_filter, extra_suffixes):
+    """Fetch scenes matching studio_filter/extra_suffixes, paginated.
+
+    `studio_filter` is resolved to studio ID(s) server-side (via findStudios)
+    and pushed into the findScenes query, instead of fetching every scene and
+    discarding non-matching studios client-side. `extra_suffixes` is the raw
+    list of configured extraSuffixes strings, used to decide whether a safe
+    title-level prefilter can also be pushed down (see build_scene_filter).
+    """
+    studio_ids = []
+    if studio_filter:
+        result = stash.call_GQL(FIND_STUDIOS_QUERY, {
+            "studio_filter": {"name": {"value": studio_filter, "modifier": "INCLUDES"}}
+        })
+        studio_ids = [s["id"] for s in result["findStudios"]["studios"]]
+
+        if not studio_ids:
+            log.info(f"Studio filter {studio_filter!r} matched no studios")
+            return []
+
+    scene_filter = build_scene_filter(studio_ids, extra_suffixes)
+    if "title" not in scene_filter and extra_suffixes:
+        log.info(
+            "Skipping title prefilter: extraSuffixes contains an entry not "
+            "ending in ')' - fetching without it to stay exhaustive."
+        )
+
     scenes = []
     page = 1
 
     while True:
         result = stash.call_GQL(FIND_SCENES_QUERY, {
-            "filter": {"page": page, "per_page": PAGE_SIZE}
+            "filter": {"page": page, "per_page": PAGE_SIZE},
+            "scene_filter": scene_filter,
         })
 
         data = result["findScenes"]
@@ -141,10 +216,10 @@ def plan_changes(scenes, studio_filter, extra_patterns):
     return changes
 
 
-def process_scenes(stash, studio_filter, extra_patterns, dry_run=True):
+def process_scenes(stash, studio_filter, extra_suffixes, extra_patterns, dry_run=True):
     """Main processing pipeline."""
     log.info("Fetching scenes...")
-    scenes = find_scenes(stash)
+    scenes = find_scenes(stash, studio_filter, extra_suffixes)
     log.info(f"Found {len(scenes)} scenes with a title")
 
     changes = plan_changes(scenes, studio_filter, extra_patterns)
@@ -203,7 +278,8 @@ def main():
 
     plugin_settings = stash.get_configuration().get("plugins", {}).get("scene-title-cleanup", {})
     studio_filter = (plugin_settings.get("studioFilter") or "").strip()
-    extra_patterns = parse_extra_suffixes(plugin_settings.get("extraSuffixes") or "")
+    extra_suffixes = _split_extra_suffixes(plugin_settings.get("extraSuffixes") or "")
+    extra_patterns = _compile_suffix_patterns(extra_suffixes)
 
     mode = json_input.get("args", {}).get("mode", "preview")
 
@@ -212,9 +288,9 @@ def main():
         log.info(f"Studio filter: {studio_filter}")
 
     if mode == "preview":
-        process_scenes(stash, studio_filter, extra_patterns, dry_run=True)
+        process_scenes(stash, studio_filter, extra_suffixes, extra_patterns, dry_run=True)
     elif mode == "apply":
-        process_scenes(stash, studio_filter, extra_patterns, dry_run=False)
+        process_scenes(stash, studio_filter, extra_suffixes, extra_patterns, dry_run=False)
     else:
         log.error(f"Unknown mode: {mode}")
 
