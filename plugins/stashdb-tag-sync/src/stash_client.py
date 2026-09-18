@@ -1,11 +1,11 @@
 """Local Stash client wrapping StashInterface for tag operations."""
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from stashapi.stashapp import StashInterface
 
 from models import Tag
-from stash_graphql_mutations import UPDATE_TAG_MUTATION
+from stash_graphql_mutations import CREATE_TAG_MUTATION, UPDATE_TAG_MUTATION
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +43,39 @@ class StashClient:
 
         return tag_map, stash_id_map
 
-    def create_tags_batch(self, tags: List[Tag]) -> Dict[str, str]:
-        """Create multiple tags, returns {lowercase_name: tag_id}."""
+    def _call_mutation(self, query: str, mutation_input: dict, success_key: str, context: str) -> Optional[dict]:
+        """Execute a GraphQL mutation, returning its success_key payload, or None on failure.
+
+        Covers both failure shapes the same way: a network-level exception from call_GQL,
+        and a GraphQL-level rejection (missing/falsy success_key in an otherwise-successful
+        response, e.g. a validation error Stash reports without raising). `context` (e.g.
+        "tag 'Foo' (ID: 1)") is folded into the log message so a batch of failures is still
+        attributable to specific tags.
+        """
+        try:
+            result = self.stash.call_GQL(query, {'input': mutation_input})
+        except Exception as e:
+            logger.error(f"Mutation failed for {context}: {e}")
+            return None
+
+        payload = result.get(success_key) if result else None
+        if not payload:
+            logger.warning(f"Mutation rejected for {context}: no '{success_key}' in response")
+            return None
+
+        return payload
+
+    def create_tags_batch(self, tags: List[Tag]) -> Tuple[Dict[str, str], int]:
+        """Create multiple tags, returns ({lowercase_name: tag_id}, failed_count).
+
+        failed_count is tracked directly rather than derived from the returned dict's size,
+        since two source tags whose names differ only by case collapse to one dict entry.
+        """
         if not tags:
-            return {}
+            return {}, 0
 
         created_tags: Dict[str, str] = {}
+        failed_count = 0
 
         for tag in tags:
             if not tag.name or not tag.name.strip():
@@ -61,19 +88,14 @@ class StashClient:
             if tag.aliases:
                 tag_input['aliases'] = tag.aliases
 
-            try:
-                created = self.stash.create_tag(tag_input)
-            except Exception as e:
-                logger.error(f"Failed to create tag '{tag.name}': {e}")
-                continue
-
+            created = self._call_mutation(CREATE_TAG_MUTATION, tag_input, 'tagCreate', f"tag '{tag.name}'")
             if created and created.get('id'):
                 created_tags[tag.name.lower()] = created['id']
                 logger.info(f"Created tag '{tag.name}' with ID {created['id']}")
             else:
-                logger.warning(f"Created tag '{tag.name}' but no ID returned")
+                failed_count += 1
 
-        return created_tags
+        return created_tags, failed_count
 
     def update_tags_batch(self, tags_with_ids: List[Tuple]) -> int:
         """Update multiple tags, returns count of successful updates.
@@ -110,14 +132,10 @@ class StashClient:
                     }]
                     stash_id_added = True
 
-            try:
-                result = self.stash.call_GQL(UPDATE_TAG_MUTATION, {'input': tag_update})
-            except Exception as e:
-                logger.error(f"Failed to update tag '{tag.name}' (ID: {tag_id}): {e}")
-                continue
-
-            if not result or not result.get('tagUpdate'):
-                logger.warning(f"Update returned no result for tag '{tag.name}' (ID: {tag_id})")
+            updated = self._call_mutation(
+                UPDATE_TAG_MUTATION, tag_update, 'tagUpdate', f"tag '{tag.name}' (ID: {tag_id})"
+            )
+            if not updated:
                 continue
 
             updated_count += 1

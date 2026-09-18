@@ -9,6 +9,80 @@ def _tag(name="Debut", description="", aliases=None):
     return Tag(name=name, description=description, stash_id="", aliases=aliases or [])
 
 
+class TestCreateTagsBatch:
+    def test_counts_successful_create(self):
+        stash = Mock()
+        stash.call_GQL.return_value = {'tagCreate': {'id': '1'}}
+        client = StashClient(stash)
+
+        created, failed_count = client.create_tags_batch([_tag()])
+
+        assert created == {"debut": "1"}
+        assert failed_count == 0
+
+    def test_does_not_count_create_rejected_at_graphql_level(self):
+        stash = Mock()
+        stash.call_GQL.return_value = {'tagCreate': None}
+        client = StashClient(stash)
+
+        created, failed_count = client.create_tags_batch([_tag()])
+
+        assert created == {}
+        assert failed_count == 1
+
+    def test_does_not_count_create_when_call_GQL_raises(self):
+        stash = Mock()
+        stash.call_GQL.side_effect = Exception("GRAPHQL_ERROR:['tagCreate'] name conflict")
+        client = StashClient(stash)
+
+        created, failed_count = client.create_tags_batch([_tag()])
+
+        assert created == {}
+        assert failed_count == 1
+
+    def test_only_successful_creates_count_in_a_mixed_batch(self):
+        stash = Mock()
+        stash.call_GQL.side_effect = [
+            {'tagCreate': {'id': '1'}},
+            {'tagCreate': None},
+            {'tagCreate': {'id': '3'}},
+        ]
+        client = StashClient(stash)
+
+        created, failed_count = client.create_tags_batch([_tag("Alpha"), _tag("Beta"), _tag("Gamma")])
+
+        assert created == {"alpha": "1", "gamma": "3"}
+        assert failed_count == 1
+
+    def test_case_variant_names_are_both_counted_as_successes_not_collapsed(self):
+        stash = Mock()
+        stash.call_GQL.side_effect = [
+            {'tagCreate': {'id': '1'}},
+            {'tagCreate': {'id': '2'}},
+        ]
+        client = StashClient(stash)
+
+        created, failed_count = client.create_tags_batch([_tag("Foo"), _tag("foo")])
+
+        assert failed_count == 0
+        assert len(created) == 1  # dict collapses case-variant names to one entry...
+        # ...which is exactly why failed_count is tracked separately, not derived from len(created)
+
+    def test_sends_name_description_and_aliases_in_the_mutation_input(self):
+        stash = Mock()
+        stash.call_GQL.return_value = {'tagCreate': {'id': '1'}}
+        client = StashClient(stash)
+
+        client.create_tags_batch([_tag(description="A debut scene", aliases=["First Timer"])])
+
+        _, variables = stash.call_GQL.call_args[0]
+        assert variables['input'] == {
+            'name': 'Debut',
+            'description': 'A debut scene',
+            'aliases': ['First Timer'],
+        }
+
+
 class TestUpdateTagsBatch:
     def test_counts_successful_update(self):
         stash = Mock()
