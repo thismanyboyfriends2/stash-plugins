@@ -55,16 +55,57 @@ The `# requires:` comment (if present) specifies comma-separated plugin dependen
 - Plugin docs: https://docs.stashapp.cc/in-app-manual/plugins/
 - Community reference: https://github.com/stashapp/CommunityScripts/
 
+## Privacy & content guardrails
+
+This repo is public. Any contributor's personal Stash instance, and any real data from it, is
+private and must never be exposed here — in issues, PR descriptions, PR/review comments, commit
+messages, code comments, docs, or example fixtures. A contributor's own `AGENTS.local.md`
+(gitignored, never committed) lists the specific identifiers this applies to for them — check
+drafts against it before publishing anything to GitHub.
+
+**Never publish to GitHub on this repo:**
+- Any personal username, hostname, or domain tied to a real Stash instance.
+- Real scene/performer/studio/gallery names, titles, or IDs from a real Stash library.
+- URLs pointing at a live personal Stash instance (e.g. `.../scenes/<id>`, `.../performers/<id>`).
+
+**When writing bug reports, examples, or test fixtures for GitHub:**
+- Use fully generic placeholders: `Some Scene Title (2008)`, `http://stash.example/scenes/123`,
+  `Performer A & Performer B`, etc.
+- Never copy real-world testing output (titles, names, URLs) verbatim into an issue/PR/comment —
+  genericize it first, even if it means the reproduction is a bit less concrete.
+- If a bug was found via real data, describe the *shape* of the input (e.g. "a bare 4-digit
+  year in parens") rather than the specific data itself.
+- Keep examples content-neutral. Stash is an adult-content media manager, but GitHub's terms
+  restrict sexually explicit content — don't use explicit titles, performer names, studio names,
+  or descriptions in issues/PRs/comments/docs, even as illustrative examples. Neutral stand-ins
+  (movie/TV-style titles, "Performer A", generic studio names) work fine for reproductions.
+
+Before opening or editing any issue/PR/comment on this repo, scan the draft against these rules
+and against your `AGENTS.local.md`, and scrub before publishing. If in doubt, check with the
+repo owner rather than publishing.
+
 ## Agent skills
+
+`docs/agents/` is gitignored and never committed — it holds the maintainer's private tooling
+notes (internal issue-tracker routing, label mappings, domain-doc conventions) and won't exist in
+a fresh clone or fork. If it's present, read it for that extra context; if it's absent, the
+sections below are self-contained and don't depend on it.
 
 ### Issue tracker
 
-Issues live on GitHub (`thismanyboyfriends2/stash-plugins`); external PRs are treated as feature requests. See `docs/agents/issue-tracker.md`.
+Issues and feature requests for this repo are filed as GitHub issues
+(`thismanyboyfriends2/stash-plugins`); external PRs are treated as feature requests and get the
+same labels/states as issues. See `docs/agents/issue-tracker.md` if present for the maintainer's
+fuller internal workflow.
 
 ### Triage labels
 
-Default canonical label names, 1:1 with the five triage roles. See `docs/agents/triage-labels.md`.
+Five canonical triage-role labels, kept separate from this repo's own work-type labels
+(bug/enhancement/etc.): `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`,
+`wontfix`. See `docs/agents/triage-labels.md` if present for any repo-specific label-name mapping.
 
 ### Domain docs
 
-Single-context layout (`CONTEXT.md` + `docs/adr/` at repo root). See `docs/agents/domain.md`.
+Single-context layout: read `CONTEXT.md` and `docs/adr/` at the repo root before making an
+architectural change, if they exist. See `docs/agents/domain.md` if present for more on how to
+use them.
