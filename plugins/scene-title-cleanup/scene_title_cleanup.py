@@ -24,8 +24,11 @@ PAGE_SIZE = 1000
 
 # Matches a single trailing "(...)" resolution/quality tag, e.g.
 # "(720 HD)", "(1080 HD)", "(720p)", "(2160p)", "(4K)", "(HD)", "(SD)".
+# Digits are only treated as a resolution when paired with "p" or an HD/SD
+# keyword - bare digits alone (e.g. a "(2008)" release year) never match,
+# since a bare 3-4 digit number in parens is indistinguishable from one.
 DEFAULT_SUFFIX_RE = re.compile(
-    r'\s*\(\s*(?:4K|UHD|\d{3,4}p?(?:\s*(?:HD|SD))?|HD|SD)\s*\)\s*$',
+    r'\s*\(\s*(?:4K|UHD|\d{3,4}p(?:\s*(?:HD|SD))?|\d{3,4}\s+(?:HD|SD)|HD|SD)\s*\)\s*$',
     re.IGNORECASE,
 )
 
