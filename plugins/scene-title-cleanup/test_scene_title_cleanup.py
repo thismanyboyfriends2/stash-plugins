@@ -1,5 +1,13 @@
 """Tests for scene_title_cleanup's title suffix-stripping logic."""
-from scene_title_cleanup import clean_title, parse_extra_suffixes, plan_changes
+from unittest.mock import Mock
+
+from scene_title_cleanup import (
+    build_scene_filter,
+    clean_title,
+    find_scenes,
+    parse_extra_suffixes,
+    plan_changes,
+)
 
 
 class TestCleanTitle:
@@ -165,3 +173,90 @@ class TestPlanChanges:
         changes = plan_changes(scenes, studio_filter="brat princess", extra_patterns=[])
 
         assert changes == []
+
+
+class TestBuildSceneFilter:
+    def test_no_studio_filter_all_paren_extras_is_title_only(self):
+        scene_filter = build_scene_filter([], ["(WEB-DL)", "(Remux)"])
+
+        assert scene_filter == {"title": {"value": ")", "modifier": "INCLUDES"}}
+
+    def test_studio_filter_set_all_paren_extras_has_both_criteria(self):
+        scene_filter = build_scene_filter(["1", "2"], ["(WEB-DL)"])
+
+        assert scene_filter == {
+            "studios": {"value": ["1", "2"], "modifier": "INCLUDES", "depth": 0},
+            "title": {"value": ")", "modifier": "INCLUDES"},
+        }
+
+    def test_no_studio_filter_one_non_paren_extra_has_no_title_criterion(self):
+        scene_filter = build_scene_filter([], ["(WEB-DL)", "WEB-DL"])
+
+        assert scene_filter == {}
+
+    def test_studio_filter_set_one_non_paren_extra_has_only_studios_criterion(self):
+        scene_filter = build_scene_filter(["1"], ["WEB-DL"])
+
+        assert scene_filter == {
+            "studios": {"value": ["1"], "modifier": "INCLUDES", "depth": 0},
+        }
+
+    def test_no_extras_defaults_to_title_only_superset(self):
+        scene_filter = build_scene_filter([], [])
+
+        assert scene_filter == {"title": {"value": ")", "modifier": "INCLUDES"}}
+
+
+class TestFindScenes:
+    def _scenes_page(self, scenes, total=None):
+        return {"findScenes": {"count": total if total is not None else len(scenes), "scenes": scenes}}
+
+    def test_no_studio_filter_skips_find_studios_call(self):
+        stash = Mock()
+        stash.call_GQL.side_effect = [self._scenes_page([{"id": "1", "title": "A", "studio": None}])]
+
+        result = find_scenes(stash, studio_filter="", extra_suffixes=[])
+
+        assert stash.call_GQL.call_count == 1
+        query = stash.call_GQL.call_args[0][0]
+        assert "findScenes" in query
+        assert len(result) == 1
+
+    def test_studio_filter_resolves_to_one_id_and_is_passed_to_scene_query(self):
+        stash = Mock()
+        stash.call_GQL.side_effect = [
+            {"findStudios": {"studios": [{"id": "42"}]}},
+            self._scenes_page([{"id": "1", "title": "A", "studio": {"name": "Brat Princess"}}]),
+        ]
+
+        result = find_scenes(stash, studio_filter="brat princess", extra_suffixes=[])
+
+        assert stash.call_GQL.call_count == 2
+        find_studios_variables = stash.call_GQL.call_args_list[0][0][1]
+        assert find_studios_variables["studio_filter"] == {
+            "name": {"value": "brat princess", "modifier": "INCLUDES"}
+        }
+        scene_query_variables = stash.call_GQL.call_args_list[1][0][1]
+        assert scene_query_variables["scene_filter"]["studios"] == {
+            "value": ["42"], "modifier": "INCLUDES", "depth": 0,
+        }
+        assert len(result) == 1
+
+    def test_studio_filter_matching_zero_studios_returns_empty_without_crashing(self):
+        stash = Mock()
+        stash.call_GQL.side_effect = [{"findStudios": {"studios": []}}]
+
+        result = find_scenes(stash, studio_filter="nonexistent studio", extra_suffixes=[])
+
+        assert result == []
+        # No scene query fired once we know zero studios can match.
+        assert stash.call_GQL.call_count == 1
+
+    def test_non_paren_extra_suffix_falls_back_to_no_title_criterion(self):
+        stash = Mock()
+        stash.call_GQL.side_effect = [self._scenes_page([{"id": "1", "title": "A", "studio": None}])]
+
+        find_scenes(stash, studio_filter="", extra_suffixes=["WEB-DL"])
+
+        scene_query_variables = stash.call_GQL.call_args_list[0][0][1]
+        assert "title" not in scene_query_variables["scene_filter"]
