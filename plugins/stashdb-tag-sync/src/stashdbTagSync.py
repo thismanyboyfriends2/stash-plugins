@@ -104,7 +104,7 @@ def plugin_main(input_data: Dict[str, Any]) -> None:
     log.info(f"Created:  {stats['created']} new tags")
     log.info(f"Updated:  {stats['updated']} existing tags")
     if stats['failed'] > 0:
-        log.info(f"Failed:   {stats['failed']} tags (update errors)")
+        log.info(f"Failed:   {stats['failed']} tags (create/update errors)")
     if stats['skipped'] > 0:
         log.info(f"Skipped:  {stats['skipped']} tags (invalid data)")
     log.info(f"Total:    {stats['total']} tags from StashDB")

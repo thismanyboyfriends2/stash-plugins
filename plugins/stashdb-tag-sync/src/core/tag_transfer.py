@@ -175,18 +175,27 @@ def transfer_tags_graphql(
     ]
 
     created_count = 0
+    create_failed_count = 0
     log.info(f"Stage 3: Creating {len(new_tags)} new tags")
     if new_tags:
         # Idempotency check: warn if any new tag names already exist (shouldn't happen, but safety check)
+        idempotent_new_tags = []
         for tag in new_tags:
             if tag.name.lower() in existing_tags_by_name:
                 log.warning(f"Tag '{tag.name}' already exists but wasn't matched - skipping to prevent duplicate")
-                new_tags.remove(tag)
+            else:
+                idempotent_new_tags.append(tag)
+        new_tags = idempotent_new_tags
 
         if new_tags:
-            created_ids = client.create_tags_batch(new_tags)
-            created_count = len(created_ids)
-            log.info(f"Successfully created {created_count} new tags")
+            created_ids, create_failed_count = client.create_tags_batch(new_tags)
+            # Not len(created_ids): two source tags whose names differ only by case
+            # collapse to one dict entry there, which would undercount real successes.
+            created_count = len(new_tags) - create_failed_count
+            if create_failed_count == 0:
+                log.info(f"Successfully created {created_count} new tags")
+            else:
+                log.warning(f"Created {created_count} of {len(new_tags)} tags ({create_failed_count} failed)")
         else:
             log.info("All new tags already exist")
     else:
@@ -208,8 +217,8 @@ def transfer_tags_graphql(
 
     log.info("Tag transfer completed successfully")
 
-    # Total failed = tags with alias conflicts + tags that failed to update
-    total_failed = failed_tags + update_failed_count
+    # Total failed = alias conflicts + tags that failed to create + tags that failed to update
+    total_failed = failed_tags + create_failed_count + update_failed_count
 
     return {
         "created": created_count,
