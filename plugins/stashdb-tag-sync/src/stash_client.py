@@ -19,6 +19,37 @@ class StashClient:
         """Initialise StashClient with a connected StashInterface instance."""
         self.stash = stash
 
+    def find_stashdb_box(self) -> Tuple[str, str]:
+        """Find the configured StashDB stash-box in Stash's stash-box settings.
+
+        Returns:
+            Tuple of (api_key, endpoint). Returns ("", "") if none is configured.
+        """
+        try:
+            boxes = self.stash.get_stashbox_connections()
+        except Exception as e:
+            logger.error(f"Failed to fetch stash-box configuration: {e}")
+            return "", ""
+
+        if not boxes:
+            logger.error("No stash boxes configured in Stash")
+            return "", ""
+
+        # Match by endpoint containing '://stashdb.org' (case insensitive)
+        for box in boxes:
+            name = box.get('name', '')
+            api_key = box.get('api_key', '')
+            endpoint = box.get('endpoint', '')
+            if api_key and endpoint and '://stashdb.org' in endpoint.lower():
+                logger.info(f"Found StashDB configuration: {name}")
+                return api_key, endpoint
+
+        logger.error("No StashDB box found in stash boxes. Configured boxes:")
+        for box in boxes:
+            logger.error(f"  - {box.get('name', 'UNKNOWN')}")
+
+        return "", ""
+
     def find_existing_tags_with_data(self) -> Tuple[Dict[str, dict], Dict[str, dict]]:
         """Find all existing tags with full data, returns ({name: tag_data}, {stash_id: tag_data})."""
         try:
