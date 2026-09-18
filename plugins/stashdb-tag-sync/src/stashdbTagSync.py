@@ -19,41 +19,6 @@ except ImportError as e:
     sys.exit(1)
 
 
-def find_stashdb_box(stash: StashInterface) -> tuple[str, str]:
-    """Find the configured StashDB stash-box in Stash's stash-box settings.
-
-    Args:
-        stash: Connected StashInterface instance
-
-    Returns:
-        Tuple of (api_key, endpoint). Returns ("", "") if none is configured.
-    """
-    try:
-        boxes = stash.get_stashbox_connections()
-    except Exception as e:
-        log.error(f"Failed to fetch stash-box configuration: {e}")
-        return ("", "")
-
-    if not boxes:
-        log.error("No stash boxes configured in Stash")
-        return ("", "")
-
-    # Match by endpoint containing '://stashdb.org' (case insensitive)
-    for box in boxes:
-        name = box.get('name', '')
-        api_key = box.get('api_key', '')
-        endpoint = box.get('endpoint', '')
-        if api_key and endpoint and '://stashdb.org' in endpoint.lower():
-            log.info(f"Found StashDB configuration: {name}")
-            return (api_key, endpoint)
-
-    log.error("No StashDB box found in stash boxes. Configured boxes:")
-    for box in boxes:
-        log.error(f"  - {box.get('name', 'UNKNOWN')}")
-
-    return ("", "")
-
-
 def plugin_main(input_data: Dict[str, Any]) -> None:
     """Main plugin execution function.
 
@@ -72,8 +37,10 @@ def plugin_main(input_data: Dict[str, Any]) -> None:
     use_cache: bool = True
     ignored_aliases: list = []
 
+    stash_client = StashClient(stash)
+
     log.info("Fetching StashDB configuration from Stash...")
-    stashdb_api_key, stashdb_endpoint = find_stashdb_box(stash)
+    stashdb_api_key, stashdb_endpoint = stash_client.find_stashdb_box()
 
     # Validate configuration
     if not stashdb_api_key:
@@ -94,7 +61,6 @@ def plugin_main(input_data: Dict[str, Any]) -> None:
 
     # Transfer tags to Stash
     log.info("Transferring tags to Stash...")
-    stash_client = StashClient(stash)
     stats = transfer_tags_graphql(stash_client, tags, config)
 
     # Display transfer summary

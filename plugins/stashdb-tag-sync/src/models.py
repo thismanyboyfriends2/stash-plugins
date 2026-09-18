@@ -12,31 +12,6 @@ class Tag:
     aliases: list[str]
     category: Optional[str] = None
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Tag':
-        """Create Tag from dictionary."""
-        aliases = data.get('aliases', '')
-
-        # Normalise aliases to list of strings
-        if isinstance(aliases, str):
-            aliases = [a.strip() for a in aliases.split(',') if a.strip()]
-        elif isinstance(aliases, list):
-            # Filter to strings only, strip whitespace
-            aliases = [str(a).strip() for a in aliases if a and str(a).strip()]
-        elif aliases is None:
-            aliases = []
-        else:
-            # Invalid type, treat as empty
-            aliases = []
-
-        return cls(
-            name=data['name'],
-            description=data.get('description', ''),
-            stash_id=data.get('stash_id', ''),
-            aliases=aliases,
-            category=data.get('category')
-        )
-
 
 @dataclass
 class Config:
