@@ -18,3 +18,5 @@ venv/
 Thumbs.db
 
 .claude
+AGENTS.local.md
+docs/agents/issue-tracker.local.md

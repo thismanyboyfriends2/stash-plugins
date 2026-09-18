@@ -55,11 +55,44 @@ The `# requires:` comment (if present) specifies comma-separated plugin dependen
 - Plugin docs: https://docs.stashapp.cc/in-app-manual/plugins/
 - Community reference: https://github.com/stashapp/CommunityScripts/
 
+## Privacy & content guardrails
+
+This repo is public on GitHub. Development happens on Forgejo, but every commit pushed to
+Forgejo's `main` mirrors to GitHub automatically — so anything in a commit, branch name, or PR on
+Forgejo is just as public as if it were pushed to GitHub directly. Forgejo *issues* are the one
+thing that stays private (issues aren't mirrored); see `docs/agents/issue-tracker.md` for that
+split. Any contributor's personal Stash instance, and any real data from it, is private and must
+never be exposed in code, commit messages, code comments, docs, or example fixtures — nor in any
+issue/PR/comment destined for GitHub (directly, or via a Forgejo issue meant to be public-facing).
+A contributor's own `AGENTS.local.md` (gitignored, never committed) lists the specific identifiers
+this applies to for them — check drafts against it before publishing anything public.
+
+**Never publish anywhere public-facing (GitHub, or a Forgejo issue/PR meant to be public) on this repo:**
+- Any personal username, hostname, or domain tied to a real Stash instance.
+- Real scene/performer/studio/gallery names, titles, or IDs from a real Stash library.
+- URLs pointing at a live personal Stash instance (e.g. `.../scenes/<id>`, `.../performers/<id>`).
+
+**When writing bug reports, examples, or test fixtures for GitHub:**
+- Use fully generic placeholders: `Some Scene Title (2008)`, `http://stash.example/scenes/123`,
+  `Performer A & Performer B`, etc.
+- Never copy real-world testing output (titles, names, URLs) verbatim into an issue/PR/comment —
+  genericize it first, even if it means the reproduction is a bit less concrete.
+- If a bug was found via real data, describe the *shape* of the input (e.g. "a bare 4-digit
+  year in parens") rather than the specific data itself.
+- Keep examples content-neutral. Stash is an adult-content media manager, but GitHub's terms
+  restrict sexually explicit content — don't use explicit titles, performer names, studio names,
+  or descriptions in issues/PRs/comments/docs, even as illustrative examples. Neutral stand-ins
+  (movie/TV-style titles, "Performer A", generic studio names) work fine for reproductions.
+
+Before opening or editing any issue/PR/comment on this repo, scan the draft against these rules
+and against your `AGENTS.local.md`, and scrub before publishing. If in doubt, check with the
+repo owner rather than publishing.
+
 ## Agent skills
 
 ### Issue tracker
 
-Issues live on GitHub (`thismanyboyfriends2/stash-plugins`); external PRs are treated as feature requests. See `docs/agents/issue-tracker.md`.
+Development (branches, PRs, issues) happens on Forgejo (`thismanyboyfriends2/stash-plugins`); GitHub is a push-mirror of the code plus a public inbox for external issues/PRs, which get triaged onto Forgejo. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
