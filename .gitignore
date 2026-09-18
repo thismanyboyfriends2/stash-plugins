@@ -19,4 +19,6 @@ Thumbs.db
 
 .claude
 AGENTS.local.md
-docs/agents/issue-tracker.local.md
+
+# Agent-facing infra docs — not for the public GitHub mirror (host/account routing details)
+docs/agents/
