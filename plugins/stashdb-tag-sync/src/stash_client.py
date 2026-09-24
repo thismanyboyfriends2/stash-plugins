@@ -12,6 +12,15 @@ logger = logging.getLogger(__name__)
 TAG_FRAGMENT = "id name description aliases stash_ids { endpoint stash_id }"
 
 
+class TagFetchError(Exception):
+    """Raised when fetching existing tags from Stash fails.
+
+    Distinguishes a failed fetch from a genuinely empty tag library, so callers
+    can abort the sync instead of treating the failure as "Stash has zero tags"
+    and mass-creating every StashDB tag as a duplicate.
+    """
+
+
 class StashClient:
     """Wrapper around StashInterface providing tag operations for the sync plugin."""
 
@@ -55,8 +64,7 @@ class StashClient:
         try:
             tags = self.stash.find_tags(fragment=TAG_FRAGMENT)
         except Exception as e:
-            logger.error(f"Failed to find existing tags with data: {e}")
-            return {}, {}
+            raise TagFetchError(f"Failed to fetch existing tags from Stash: {e}") from e
 
         tag_map: Dict[str, dict] = {}
         stash_id_map: Dict[str, dict] = {}
