@@ -3,9 +3,11 @@
 import os
 import sys
 import json
+import logging
 from typing import Dict, Any
 
 import stashapi.log as log
+from stashapi.log import StashLogHandler
 
 try:
     from stashapi.stashapp import StashInterface
@@ -17,6 +19,37 @@ except ImportError as e:
     # If imports fail, output error so Stash can display it
     log.error(f"Import error: {str(e)}")
     sys.exit(1)
+
+
+# stdlib loggers used by the modules this bridge targets - kept explicit rather than
+# bridging root wholesale, so third-party loggers (e.g. requests/urllib3, used by
+# graphql_client) don't also start emitting DEBUG noise into Stash's plugin log.
+_BRIDGED_LOGGER_NAMES = ("stash_client", "graphql_client", "core.tag_transfer")
+
+
+def configure_logging(stream=None) -> None:
+    """Bridge stdlib `logging` (used by tag_transfer/stash_client/graphql_client) into
+    stashapi.log's wire protocol, so their records reach Stash's plugin log UI instead
+    of falling through to Python's default stderr handler or being dropped below WARNING.
+
+    `stream` is exposed only so tests can point the handler at an in-memory buffer instead
+    of `StashLogHandler`'s early-bound default (its `stream=sys.stderr` default argument is
+    resolved once, at import time, so it can't be swapped later via capsys/capfd).
+    """
+    root = logging.getLogger()
+    if not any(isinstance(h, StashLogHandler) for h in root.handlers):
+        handler = StashLogHandler(stream) if stream is not None else StashLogHandler()
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        root.addHandler(handler)
+
+    # stashapi.log's own 'StashLogger' logger already has its own StashLogHandler bound
+    # directly to sys.stderr; it also has no dots, so it too propagates to root by default.
+    # Without this, every stashapi.log.* call (used throughout this file) would now emit
+    # twice - once via its own handler, once via the one just added to root.
+    logging.getLogger("StashLogger").propagate = False
+
+    for name in _BRIDGED_LOGGER_NAMES:
+        logging.getLogger(name).setLevel(logging.DEBUG)
 
 
 def plugin_main(input_data: Dict[str, Any]) -> None:
@@ -84,6 +117,7 @@ def main() -> None:
     input parsing through tag transfer, logs it via Stash's log protocol,
     and exits non-zero.
     """
+    configure_logging()
     log.debug(f"Plugin starting - CWD: {os.getcwd()}, Python: {sys.executable}, Args: {sys.argv}")
     log.debug(f"stdin isatty: {sys.stdin.isatty()}")
 
