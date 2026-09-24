@@ -1,6 +1,8 @@
 """Tests for tag_transfer's core merge/conflict/sync logic."""
 from unittest.mock import Mock
 
+import pytest
+
 from models import Tag, Config
 from core.tag_transfer import (
     _filter_new_tags,
@@ -11,6 +13,7 @@ from core.tag_transfer import (
     _merge_tag_data,
     transfer_tags_graphql,
 )
+from stash_client import TagFetchError
 
 
 def _stashdb_tag(name="Debut", description="", aliases=None, stash_id="sdb-1", category=None):
@@ -332,6 +335,17 @@ class TestTransferTagsGraphql:
 
         client.create_tags_batch.assert_called_once_with([tag])
         assert stats["created"] == 1
+
+    def test_fetch_failure_aborts_before_any_create_or_update(self):
+        tag = _stashdb_tag(name="Debut", stash_id="sdb-1")
+        client = self._client()
+        client.find_existing_tags_with_data.side_effect = TagFetchError("connection refused")
+
+        with pytest.raises(TagFetchError):
+            transfer_tags_graphql(client, [tag], Config(stashdb_api_key="key"))
+
+        client.create_tags_batch.assert_not_called()
+        client.update_tags_batch.assert_not_called()
 
 class TestFilterNewTags:
     """Covers the stage-3 idempotency filter directly.
