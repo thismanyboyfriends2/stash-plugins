@@ -12,7 +12,7 @@ from stashapi.log import StashLogHandler
 try:
     from stashapi.stashapp import StashInterface
     from graphql_client import StashDBClient
-    from stash_client import StashClient
+    from stash_client import StashClient, TagFetchError
     from core.tag_transfer import transfer_tags_graphql
     from models import Config
 except ImportError as e:
@@ -94,7 +94,12 @@ def plugin_main(input_data: Dict[str, Any]) -> None:
 
     # Transfer tags to Stash
     log.info("Transferring tags to Stash...")
-    stats = transfer_tags_graphql(stash_client, tags, config)
+    try:
+        stats = transfer_tags_graphql(stash_client, tags, config)
+    except TagFetchError as e:
+        log.error(f"Aborting sync: {e}")
+        log.error("No tags were created or updated - a fetch failure was not treated as an empty tag library")
+        sys.exit(1)
 
     # Display transfer summary
     log.info("=" * 50)

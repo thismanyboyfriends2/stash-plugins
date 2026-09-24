@@ -1,8 +1,10 @@
 """Tests for StashClient's tag-write failure detection."""
 from unittest.mock import Mock
 
+import pytest
+
 from models import Tag
-from stash_client import StashClient
+from stash_client import StashClient, TagFetchError
 
 
 def _tag(name="Debut", description="", aliases=None):
@@ -157,6 +159,38 @@ class TestFindStashdbBox:
         result = client.find_stashdb_box()
 
         assert result == ("", "")
+
+
+class TestFindExistingTagsWithData:
+    def test_raises_tag_fetch_error_when_find_tags_raises(self):
+        stash = Mock()
+        stash.find_tags.side_effect = Exception("connection refused")
+        client = StashClient(stash)
+
+        with pytest.raises(TagFetchError):
+            client.find_existing_tags_with_data()
+
+    def test_returns_empty_maps_when_stash_genuinely_has_no_tags(self):
+        stash = Mock()
+        stash.find_tags.return_value = []
+        client = StashClient(stash)
+
+        tag_map, stash_id_map = client.find_existing_tags_with_data()
+
+        assert tag_map == {}
+        assert stash_id_map == {}
+
+    def test_builds_name_and_stash_id_maps_from_returned_tags(self):
+        stash = Mock()
+        stash.find_tags.return_value = [
+            {"name": "Debut", "stash_ids": [{"endpoint": "https://stashdb.org/graphql", "stash_id": "sdb-1"}]},
+        ]
+        client = StashClient(stash)
+
+        tag_map, stash_id_map = client.find_existing_tags_with_data()
+
+        assert tag_map == {"debut": stash.find_tags.return_value[0]}
+        assert stash_id_map == {"sdb-1": stash.find_tags.return_value[0]}
 
 
 class TestUpdateTagsBatch:
