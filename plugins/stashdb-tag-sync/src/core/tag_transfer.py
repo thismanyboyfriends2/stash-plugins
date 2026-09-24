@@ -1,7 +1,6 @@
 """Core tag transfer logic for plugin."""
 import logging
-from dataclasses import dataclass
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from models import Tag, Config
 from stash_client import StashClient
@@ -44,8 +43,17 @@ def _merge_tag_data(stashdb_tag: Tag, existing_tag: dict, ignored_aliases: list[
     )
 
 
-def _has_alias_conflicts(merged_tag: Tag, existing_tags_by_name: dict, ignored_aliases: list[str] = None) -> list[str]:
+def _has_alias_conflicts(
+    merged_tag: Tag,
+    existing_tags_by_name: dict,
+    ignored_aliases: list[str] = None,
+    own_tag_id: str = None,
+) -> list[str]:
     """Check if merged tag's aliases conflict with existing tag names.
+
+    `own_tag_id`, when given, is the id of the local tag being updated: an
+    alias that resolves to that same tag (its own current name, or a former
+    name it's being renamed away from) is its own identity, not a conflict.
 
     Returns list of conflicting aliases that already exist as tag names.
     """
@@ -57,15 +65,31 @@ def _has_alias_conflicts(merged_tag: Tag, existing_tags_by_name: dict, ignored_a
 
     for alias in merged_tag.aliases:
         alias_lower = alias.lower().strip()
-        if alias_lower and alias_lower not in ignored_set and alias_lower in existing_tags_by_name:
-            conflicts.append(alias)
+        if not alias_lower or alias_lower in ignored_set:
+            continue
+
+        match = existing_tags_by_name.get(alias_lower)
+        if match is None:
+            continue
+        if own_tag_id is not None and match.get('id') == own_tag_id:
+            continue
+
+        conflicts.append(alias)
 
     return conflicts
 
 
 def _is_tag_out_of_sync(stashdb_tag: Tag, existing_tag: dict, ignored_aliases: list[str] = None) -> bool:
-    """Check if a tag differs from Stash after merging (compares merged description, aliases, and stash_ids)."""
+    """Check if a tag differs from Stash after merging (compares every merged field against the existing tag)."""
     merged = _merge_tag_data(stashdb_tag, existing_tag, ignored_aliases)
+
+    existing_name = (existing_tag.get('name') or "").strip()
+    merged_name = (merged.name or "").strip()
+    if existing_name != merged_name:
+        log.debug(f"  Name differs for '{stashdb_tag.name}':")
+        log.debug(f"    Stash: '{existing_name}'")
+        log.debug(f"    Merged: '{merged_name}'")
+        return True
 
     existing_desc = (existing_tag.get('description') or "").strip()
     merged_desc = (merged.description or "").strip()
@@ -96,83 +120,42 @@ def _is_tag_out_of_sync(stashdb_tag: Tag, existing_tag: dict, ignored_aliases: l
     return False
 
 
-@dataclass
-class _MatchState:
-    """Shared, mutated-in-place state threaded through both matching stages."""
-    existing_tags_by_name: dict
-    ignored_aliases: list
-    matched_tags: set
-    tags_to_update: list
+def _resolve_local_match(
+    tag: Tag,
+    existing_tags_by_stash_id: dict,
+    existing_tags_by_name: dict,
+    claimed_ids: set,
+) -> tuple[Optional[dict], Optional[str], bool]:
+    """Find the one local tag this StashDB tag owns, trying stash_id then name.
 
+    A local tag id already in `claimed_ids` (claimed by an earlier StashDB
+    tag this run) is never matched again, so a single local tag can only be
+    reached once per run - via stash_id or name, never both.
 
-def _match(
-    tags: List[Tag],
-    lookup: dict,
-    key_fn: Callable[[Tag], Optional[str]],
-    state: _MatchState,
-    reject_blank_name: bool = False,
-) -> tuple[int, int, int]:
-    """Match tags against `lookup` by `key_fn(tag)`, merging/updating/marking matched as needed.
-
-    Shared by the stash_id and name matching stages - only the lookup dict,
-    key function, and `reject_blank_name` differ between them. A tag already
-    present in `state.matched_tags` (from an earlier stage) is skipped so
-    it's never re-matched. `state.matched_tags` and `state.tags_to_update`
-    are mutated in place.
-
-    `reject_blank_name` preserves a pre-existing asymmetry between the two
-    original stages: the stash_id stage validated the matched tag's name
-    before updating it (its own outer condition never checked `tag.name`,
-    so a stash_id match could still carry a blank name), while the name
-    stage never needed to - its outer condition already required a
-    non-blank `tag.name` to compute the lookup key in the first place, so a
-    tag with a whitespace-only name was matched and updated same as any
-    other. Passing `reject_blank_name=True` only for the stash_id stage
-    keeps that original difference intact.
-
-    Returns (matches, skipped, failed) counts for this stage:
-    - matches: matched and needs an update
-    - skipped: matched but rejected for a blank name (stash_id stage only)
-    - failed: matched but the merge would create an alias conflict
+    Returns (existing_tag, match_source, already_claimed):
+    - A resolved match: (existing_tag, 'stash_id' | 'name', False)
+    - A candidate exists but its local tag was already claimed this run
+      (e.g. a local tag carrying two StashDB stash_ids, both present in this
+      batch): (None, 'stash_id' | 'name', True). This is not "no match" -
+      creating a new tag for it would duplicate a tag that's already been
+      resolved.
+    - No candidate at all: (None, None, False)
     """
-    matches = 0
-    skipped = 0
-    failed = 0
+    if tag.stash_id:
+        candidate = existing_tags_by_stash_id.get(tag.stash_id)
+        if candidate is not None:
+            if candidate['id'] in claimed_ids:
+                return None, 'stash_id', True
+            return candidate, 'stash_id', False
 
-    for tag in tags:
-        name_key = tag.name.lower() if tag.name else None
-        if name_key is not None and name_key in state.matched_tags:
-            continue
+    if tag.name:
+        candidate = existing_tags_by_name.get(tag.name.lower())
+        if candidate is not None:
+            if candidate['id'] in claimed_ids:
+                return None, 'name', True
+            return candidate, 'name', False
 
-        key = key_fn(tag)
-        if key is None or key not in lookup:
-            continue
-
-        if reject_blank_name and (not tag.name or not tag.name.strip()):
-            log.warning(f"Tag with key {key!r} has no name - skipping to prevent invalid update")
-            skipped += 1
-            continue
-
-        existing_tag = lookup[key]
-        if _is_tag_out_of_sync(tag, existing_tag, state.ignored_aliases):
-            merged_tag = _merge_tag_data(tag, existing_tag, state.ignored_aliases)
-
-            conflicts = _has_alias_conflicts(merged_tag, state.existing_tags_by_name, state.ignored_aliases)
-            if conflicts:
-                log.warning(f"Cannot update '{tag.name}' - aliases {conflicts} already exist as tag names")
-                failed += 1
-            else:
-                state.tags_to_update.append(
-                    (existing_tag['id'], merged_tag, existing_tag.get('stash_ids', []), tag.stash_id)
-                )
-                log.debug(f"  Matched '{tag.name}' - needs update")
-                matches += 1
-        else:
-            log.debug(f"  Matched '{tag.name}' - in sync")
-
-        state.matched_tags.add(name_key)
-
-    return matches, skipped, failed
+    return None, None, False
 
 
 def _filter_new_tags(new_tags: List[Tag], existing_tags_by_name: dict) -> List[Tag]:
@@ -197,7 +180,12 @@ def transfer_tags_graphql(
     tags: List[Tag],
     config: Config
 ) -> dict:
-    """Transfer tags via three-stage matching: stash_id, then name, then create new.
+    """Transfer tags: resolve each StashDB tag to exactly one local match, then create/update.
+
+    Each StashDB tag is resolved to at most one local tag - tried by
+    stash_id first, then by name - so a single local tag can never be
+    matched twice in the same run and never gets two conflicting update
+    entries. A tag with no local match is queued for creation.
 
     Returns:
         Dictionary with transfer statistics (created, updated, skipped, failed)
@@ -207,42 +195,56 @@ def transfer_tags_graphql(
     existing_tags_by_name, existing_tags_by_stash_id = client.find_existing_tags_with_data()
     log.info(f"Found {len(existing_tags_by_name)} existing tags in Stash")
 
-    state = _MatchState(
-        existing_tags_by_name=existing_tags_by_name,
-        ignored_aliases=config.ignored_aliases,
-        matched_tags=set(),
-        tags_to_update=[],
-    )
+    claimed_ids: set = set()
+    tags_to_update = []
+    new_tags = []
+    matched_count = 0
+    skipped_tags = 0
+    failed_tags = 0
 
-    # Stage 1: Match by stash_id (most reliable)
-    log.info("Stage 1: Matching tags by stash_id...")
-    stage1_matches, skipped_tags, stage1_failed = _match(
-        tags, existing_tags_by_stash_id, lambda t: t.stash_id or None,
-        state, reject_blank_name=True,
-    )
-    log.info(f"Stage 1: Found {stage1_matches} tags to update by stash_id")
+    log.info("Resolving each StashDB tag to its local match...")
+    for tag in tags:
+        existing_tag, match_source, already_claimed = _resolve_local_match(
+            tag, existing_tags_by_stash_id, existing_tags_by_name, claimed_ids,
+        )
 
-    # Stage 2: Match remaining tags by name (case-insensitive)
-    log.info("Stage 2: Matching remaining tags by name...")
-    stage2_matches, _, stage2_failed = _match(
-        tags, existing_tags_by_name, lambda t: t.name.lower() if t.name else None,
-        state,
-    )
-    log.info(f"Stage 2: Found {stage2_matches} tags to update by name")
+        if existing_tag is None:
+            if already_claimed:
+                log.debug(f"  '{tag.name}' resolves to a local tag already handled this run via {match_source}")
+            elif tag.name:
+                new_tags.append(tag)
+            continue
 
-    matched_tags = state.matched_tags
-    tags_to_update = state.tags_to_update
+        if match_source == 'stash_id' and (not tag.name or not tag.name.strip()):
+            log.warning(f"Tag with stash_id {tag.stash_id!r} has no name - skipping to prevent invalid update")
+            skipped_tags += 1
+            continue
 
-    failed_tags = stage1_failed + stage2_failed
+        claimed_ids.add(existing_tag['id'])
 
-    new_tags = [
-        tag for tag in tags
-        if tag.name and tag.name.lower() not in matched_tags
-    ]
+        if _is_tag_out_of_sync(tag, existing_tag, config.ignored_aliases):
+            merged_tag = _merge_tag_data(tag, existing_tag, config.ignored_aliases)
+
+            conflicts = _has_alias_conflicts(
+                merged_tag, existing_tags_by_name, config.ignored_aliases, own_tag_id=existing_tag['id'],
+            )
+            if conflicts:
+                log.warning(f"Cannot update '{tag.name}' - aliases {conflicts} already exist as tag names")
+                failed_tags += 1
+            else:
+                tags_to_update.append(
+                    (existing_tag['id'], merged_tag, existing_tag.get('stash_ids', []), tag.stash_id)
+                )
+                log.debug(f"  Matched '{tag.name}' via {match_source} - needs update")
+                matched_count += 1
+        else:
+            log.debug(f"  Matched '{tag.name}' via {match_source} - in sync")
+
+    log.info(f"Resolved {matched_count} tags to update by stash_id/name")
 
     created_count = 0
     create_failed_count = 0
-    log.info(f"Stage 3: Creating {len(new_tags)} new tags")
+    log.info(f"Creating {len(new_tags)} new tags")
     if new_tags:
         new_tags = _filter_new_tags(new_tags, existing_tags_by_name)
 
